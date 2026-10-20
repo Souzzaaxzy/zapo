@@ -338,6 +338,26 @@ test('a group offer never names more than the server roster bound (127 accounts)
     assert.equal(users[0].attrs.jid, '50062877036657@lid', 'o criador segue primeiro')
 })
 
+test('a huge group only resolves devices for the accounts that fit the offer', async () => {
+    // Eficiencia: um grupo de centenas nao pode resolver o device de TODO mundo
+    // so' para descartar quase tudo no corte. O teto e' aplicado ANTES da
+    // resolucao (que e' a parte cara: um lookup por conta).
+    const pedidos: string[][] = []
+    const deps = createDeps(async (jids) => {
+        pedidos.push([...jids])
+        return jids.map((jid) => ({ jid, deviceJids: [`${jid.split('@')[0]}:1@lid`] }))
+    })
+    const many = Array.from({ length: 400 }, (_, i) => ({ jid: `200000000000${i}@lid` }))
+    const { participants } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false)
+
+    assert.equal(participants.length, 0x7f, 'o offer leva no maximo 127 contas')
+    const resolvidas = pedidos.flat().length
+    assert.ok(
+        resolvidas <= 0x7f - 1,
+        `resolveu no maximo 126 contas (o criador ocupa a primeira), veio ${resolvidas}`
+    )
+})
+
 test('a group offer below the bound is not trimmed', async () => {
     const { node } = await buildGroupOfferStanza(
         createDeps(),

@@ -51,7 +51,13 @@ export async function buildGroupOfferStanza(deps, callId, groupJid, participants
         throw new Error('a group call offer has no jid of ours to name as its call-creator');
     }
     const creatorKey = groupParticipantAccountKey(callCreator);
-    const resolved = await resolveOfferParticipantDevices(deps, participants.filter((participant) => groupParticipantAccountKey(participant.jid) !== creatorKey), log);
+    // Cap BEFORE resolving devices: a group of hundreds would otherwise resolve every
+    // device (a fan-out lookup per account) only to throw all but the last 127 away. The
+    // creator takes the first slot, so at most `WA_GROUP_OFFER_MAX_ACCOUNTS - 1` others fit.
+    const candidates = participants
+        .filter((participant) => groupParticipantAccountKey(participant.jid) !== creatorKey)
+        .slice(0, WA_GROUP_OFFER_MAX_ACCOUNTS - 1);
+    const resolved = await resolveOfferParticipantDevices(deps, candidates, log);
     if (resolved.length === 0) {
         throw new Error(`group call on ${groupJid} has no participant to ring`);
     }
