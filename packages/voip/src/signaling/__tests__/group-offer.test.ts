@@ -401,7 +401,11 @@ test('a voice chat flags itself, announces silence, and ships the roster', async
     const offer = offerNode(node)
 
     assert.equal(offer.attrs.lightweight, '1', 'the voice chat flag the server reads')
-    assert.equal(offer.attrs.is_lightweight, '1', 'and the spelling the official client uses')
+    assert.equal(
+        offer.attrs.is_lightweight,
+        undefined,
+        'apenas o marcador que funciona: um atributo desconhecido descarta o offer'
+    )
     assert.equal(offer.attrs['group-jid'], GROUP_JID, 'the group attribute is kept alongside it')
 
     const children = offer.content as BinaryNode[]
