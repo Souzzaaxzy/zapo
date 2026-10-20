@@ -822,6 +822,15 @@ export class WaCallMediaSession {
         // against, and that roster is read from this very ack.
         this.lastOfferAckNode = node
 
+        // At `warn` so it is always visible: whether the server answered the offer at all is
+        // what separates "it never replied" from "it replied and we did nothing with it".
+        this.logger.warn('offer ack received', {
+            callId: this.info.callId,
+            error: node.attrs?.error ?? null,
+            hasRoster: findNodeChild(node, 'group_info') !== undefined,
+            hasRelay: findNodeChild(node, 'relay') !== undefined
+        })
+
         const error = node.attrs?.error
         if (error) {
             // `427` is the server's STALE ROSTER nack: it echoes the device set it wants and
