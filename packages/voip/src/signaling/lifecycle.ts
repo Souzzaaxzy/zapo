@@ -35,12 +35,22 @@ export const CAPABILITY_OFFER = new Uint8Array([0x01, 0x05, 0xf7, 0x09, 0xe4, 0x
 export const CAPABILITY_VIDEO_OFFER = new Uint8Array([0x01, 0x05, 0xf7, 0x09, 0xe0, 0xfa, 0x03])
 const CAPABILITY_PREACCEPT = new Uint8Array([0x01, 0x05, 0xff, 0x09, 0xe4, 0xbb, 0x07])
 
-/** The media an offer announces, 1:1 or group: the two opus rates, video when asked, `<net>`. */
-export function buildOfferMediaNodes(isVideo: boolean): BinaryNode[] {
+/**
+ * The media an offer announces, 1:1 or group: the two opus rates, video when asked, `<net>`.
+ *
+ * `isLightweight` marks a group call as a voice chat, which announces `<silence>` instead of
+ * media: it never rings and nobody speaks until a member joins. Measured against WhatsApp Web,
+ * a voice chat offer differs from a plain one by the `lightweight` attribute plus this node.
+ */
+export function buildOfferMediaNodes(isVideo: boolean, isLightweight = false): BinaryNode[] {
     const nodes: BinaryNode[] = [
         { tag: 'audio', attrs: { enc: 'opus', rate: '8000' }, content: undefined },
         { tag: 'audio', attrs: { enc: 'opus', rate: '16000' }, content: undefined }
     ]
+
+    if (isLightweight) {
+        nodes.push({ tag: 'silence', attrs: { reason: 'lightweight' }, content: undefined })
+    }
 
     if (isVideo) {
         nodes.push({
@@ -109,7 +119,6 @@ export async function buildOfferStanza(
     }
 
     offerContent.push(...buildOfferMediaNodes(isVideo))
-
     offerContent.push({
         tag: 'capability',
         attrs: { ver: '1' },

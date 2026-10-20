@@ -181,6 +181,11 @@ export interface GroupCallOfferOptions extends CallOfferCommonOptions {
     groupJid: string
     /** Who to ring, ourselves excluded. */
     participants: readonly CallOfferParticipant[]
+    /**
+     * Start a voice chat instead of a call that rings (default `false`). The offer carries
+     * `lightweight='1'` and announces `<silence>`, so the group is not rung.
+     */
+    isLightweight?: boolean
     peerJid?: never
     peerDevices?: never
 }

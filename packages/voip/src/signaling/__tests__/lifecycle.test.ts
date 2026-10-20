@@ -6,6 +6,7 @@ import type { BinaryNode } from 'zapo-js/transport'
 import { CallState, EndCallReason, type WaVoipDeps, type WaVoipStores } from '../../types.js'
 import {
     buildAcceptStanza,
+    buildOfferMediaNodes,
     buildOfferStanza,
     buildPreacceptStanza,
     buildRejectStanza,
@@ -316,4 +317,23 @@ test('parseGroupJidAttr reads either spelling and reports no group as null', () 
     assert.equal(parseGroupJidAttr(offerNode({ 'group-jid': '' })), null)
     // Joinable and group are independent: an ad-hoc joinable call names no group.
     assert.equal(parseGroupJidAttr(offerNode({ joinable: '1' })), null)
+})
+
+test('the offer media nodes carry the audio rates and net, and no silence by default', () => {
+    const nodes = buildOfferMediaNodes(false)
+    assert.deepEqual(
+        nodes.map((node) => node.tag),
+        ['audio', 'audio', 'net']
+    )
+})
+
+test('a lightweight offer announces silence between the audio rates and net', () => {
+    const nodes = buildOfferMediaNodes(false, true)
+
+    assert.deepEqual(
+        nodes.map((node) => node.tag),
+        ['audio', 'audio', 'silence', 'net']
+    )
+    const silence = nodes.find((node) => node.tag === 'silence')
+    assert.equal(silence?.attrs.reason, 'lightweight')
 })

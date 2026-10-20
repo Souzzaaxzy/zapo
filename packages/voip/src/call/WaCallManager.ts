@@ -221,6 +221,7 @@ export class WaCallManager extends EventEmitter {
             groupJid,
             participants,
             options.isVideo ?? false,
+            options.isLightweight ?? false,
             this.signalingLogger
         )
         this.throwIfDestroyed()

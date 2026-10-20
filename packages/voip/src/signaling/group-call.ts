@@ -41,6 +41,10 @@ function buildGroupUserNode(
  * call, the only one carrying a `<capability>`) and no `<destination>`, `<enc>`, `<encopt>` or `<device-identity>`: the key
  * arrives later over `enc_rekey`. The server fills `joinable` and the `<group_info>` attributes.
  *
+ * `isLightweight` places a voice chat instead of a ringing call: the offer carries `lightweight='1'`
+ * and announces `<silence>`, so joining the group does not make everyone's phone ring. See
+ * {@link buildOfferMediaNodes}.
+ *
  * @throws with no own jid, with nobody left to ring, or through
  * {@link normalizeParticipantDeviceJids}.
  */
@@ -50,6 +54,7 @@ export async function buildGroupOfferStanza(
     groupJid: string,
     participants: readonly CallOfferParticipant[],
     isVideo: boolean,
+    isLightweight = false,
     logger?: Logger
 ): Promise<GroupOfferStanza> {
     const log = logger ?? createNoopLogger()
@@ -92,8 +97,11 @@ export async function buildGroupOfferStanza(
             'offer',
             callId,
             callCreator,
-            { 'group-jid': groupJid },
-            [...buildOfferMediaNodes(isVideo), { tag: 'group_info', attrs: {}, content: users }]
+            isLightweight ? { 'group-jid': groupJid, lightweight: '1' } : { 'group-jid': groupJid },
+            [
+                ...buildOfferMediaNodes(isVideo, isLightweight),
+                { tag: 'group_info', attrs: {}, content: users }
+            ]
         ),
         participants: listed
     }

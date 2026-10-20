@@ -316,3 +316,46 @@ test('a group offer needs a jid of ours to name as its call-creator', async () =
         /call-creator/
     )
 })
+
+test('a plain group offer marks no voice chat', async () => {
+    const { node } = await buildGroupOfferStanza(
+        createDeps(),
+        CALL_ID,
+        GROUP_JID,
+        PARTICIPANTS,
+        false
+    )
+    const offer = offerNode(node)
+
+    assert.equal(offer.attrs.lightweight, undefined)
+    assert.equal(
+        (offer.content as BinaryNode[]).some((child) => child.tag === 'silence'),
+        false
+    )
+})
+
+test('a lightweight group offer flags the voice chat and announces silence', async () => {
+    const { node } = await buildGroupOfferStanza(
+        createDeps(),
+        CALL_ID,
+        GROUP_JID,
+        PARTICIPANTS,
+        false,
+        true
+    )
+    const offer = offerNode(node)
+
+    assert.equal(offer.attrs.lightweight, '1', 'the voice chat flag is what the server reads')
+    assert.equal(offer.attrs['group-jid'], GROUP_JID, 'the group attribute is kept alongside it')
+
+    const silence = (offer.content as BinaryNode[]).find((child) => child.tag === 'silence')
+    assert.equal(silence?.attrs.reason, 'lightweight')
+    // `<silence>` sits between the audio rates and `<net>`, as WhatsApp Web emits it.
+    const tags = (offer.content as BinaryNode[]).map((child) => child.tag)
+    assert.deepEqual(tags.indexOf('silence'), tags.indexOf('net') - 1)
+    assert.equal(
+        (offer.content as BinaryNode[]).filter((child) => child.tag === 'audio').length,
+        2,
+        'the audio rates are announced either way'
+    )
+})
