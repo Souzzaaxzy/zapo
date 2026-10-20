@@ -599,6 +599,12 @@ class WaCallMediaSession {
         if (!this.info.voipSettings) {
             this.applyVoipSettings((0, voip_settings_js_1.parseVoipSettings)(node, this.logger));
         }
+        // The ack of a group offer carries the roster the server accepted: the membership is
+        // seeded from it, exactly as the offer's own `<group_info>` would be. It is the ONLY
+        // roster a voice chat gets when its offer shipped none (a group too big to name), so
+        // without this the call would sit with an empty composition and never come up.
+        if (this.isGroupCall)
+            this.seedGroupComposition(node);
         const relayData = (0, relay_ack_js_1.parseRelayFromAck)(node);
         const { endpoints, participantJids } = relayData;
         if (endpoints.length === 0 || this.relays.hasAdopted)
