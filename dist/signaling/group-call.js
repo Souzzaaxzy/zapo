@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.WA_PEER_STATE = void 0;
+exports.WA_PEER_STATE = exports.WA_GROUP_OFFER_MAX_ACCOUNTS = void 0;
 exports.buildGroupOfferStanza = buildGroupOfferStanza;
 exports.buildEncRekeyStanza = buildEncRekeyStanza;
 exports.buildHeartbeatStanza = buildHeartbeatStanza;
@@ -15,6 +15,16 @@ const call_key_js_1 = require("./call-key.js");
 const call_stanza_js_1 = require("./call-stanza.js");
 const group_info_js_1 = require("./group-info.js");
 const lifecycle_js_1 = require("./lifecycle.js");
+/**
+ * The most accounts a group `<offer>`'s `<group_info>` may name, ourselves included.
+ *
+ * Measured: the server refuses an offer that names more, with `error: '427'` on the
+ * `<ack>` (`handleCallAck` -> `SetupFailed`). The ceiling is the roster bound the
+ * official client enforces (`GroupInfoStanza.MAX_PARTICIPANTS = 0x7f`), not the
+ * 32-participant limit of a *connected* call: a group of 128 members overflows it by
+ * one, because the creator counts. Naming fewer is always accepted.
+ */
+exports.WA_GROUP_OFFER_MAX_ACCOUNTS = 0x7f;
 function buildGroupUserNode(participant, capability) {
     return {
         tag: 'user',
@@ -64,6 +74,8 @@ async function buildGroupOfferStanza(deps, callId, groupJid, participants, isVid
             jid: (0, protocol_1.toUserJid)(participant.jid),
             devices: (0, group_info_js_1.normalizeParticipantDeviceJids)(participant.jid, participant.devices)
         };
+        if (listed.length >= exports.WA_GROUP_OFFER_MAX_ACCOUNTS)
+            break;
         listed.push(entry);
         users.push(buildGroupUserNode(entry));
     }
