@@ -49,8 +49,15 @@ async function buildGroupOfferStanza(deps, callId, groupJid, participants, isVid
         throw new Error('a group call offer has no jid of ours to name as its call-creator');
     }
     const creatorKey = (0, jid_js_1.groupParticipantAccountKey)(callCreator);
-    const resolved = await (0, peer_devices_js_1.resolveOfferParticipantDevices)(deps, participants.filter((participant) => (0, jid_js_1.groupParticipantAccountKey)(participant.jid) !== creatorKey), log);
-    if (resolved.length === 0) {
+    // A VOICE CHAT rings nobody: the group is not rung, whoever wants to join taps the card.
+    // Naming every member would be both useless and over the platform's ring limit, so the offer
+    // lists only ourselves and the server fills the roster from its answer. This is what lets a
+    // voice chat start in a group of hundreds of members, which is what the feature is for.
+    const toRing = isLightweight
+        ? []
+        : participants.filter((participant) => (0, jid_js_1.groupParticipantAccountKey)(participant.jid) !== creatorKey);
+    const resolved = await (0, peer_devices_js_1.resolveOfferParticipantDevices)(deps, toRing, log);
+    if (!isLightweight && resolved.length === 0) {
         throw new Error(`group call on ${groupJid} has no participant to ring`);
     }
     const creator = {
