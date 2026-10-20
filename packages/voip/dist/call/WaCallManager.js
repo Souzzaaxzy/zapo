@@ -109,18 +109,14 @@ class WaCallManager extends node_events_1.EventEmitter {
         const callId = (0, call_stanza_js_1.generateCallId)();
         const mediaType = options.isVideo ? types_js_1.CallMediaType.Video : types_js_1.CallMediaType.Audio;
         const callCreator = (0, call_jids_js_1.selfJidOf)(this.deps);
-        const isLightweight = options.isLightweight ?? false;
         const offer = await (0, group_call_js_1.buildGroupOfferStanza)(this.deps, callId, groupJid, participants, options.isVideo ?? false, options.isLightweight ?? false, this.signalingLogger);
         this.throwIfDestroyed();
         const creatorKey = (0, jid_js_1.groupParticipantAccountKey)(callCreator);
         const firstPeer = offer.participants.find((participant) => (0, jid_js_1.groupParticipantAccountKey)(participant.jid) !== creatorKey);
-        if (!firstPeer && !isLightweight) {
+        if (!firstPeer) {
             throw new Error(`a group call on ${groupJid} needs the participants to ring`);
         }
-        // A voice chat rings nobody, so it has no peer to address: the call itself is the target,
-        // exactly as a group accept does. `peerJid` is only a placeholder for the media session.
-        const peerJid = firstPeer?.jid ?? (0, call_stanza_js_1.toCallServerJid)(callId);
-        const info = call_state_js_1.CallInfo.newOutgoing(callId, peerJid, callCreator, mediaType);
+        const info = call_state_js_1.CallInfo.newOutgoing(callId, firstPeer.jid, callCreator, mediaType);
         info.groupJid = groupJid;
         info.joinable = true;
         info.isLightweight = options.isLightweight ?? false;
@@ -129,7 +125,7 @@ class WaCallManager extends node_events_1.EventEmitter {
         this.applyPendingCallKey(session);
         this.reporter.markAnnounced(info);
         try {
-            await session.initMedia(callCreator, firstPeer?.devices[0] ?? peerJid);
+            await session.initMedia(callCreator, firstPeer.devices[0] ?? firstPeer.jid);
             this.throwIfDestroyed();
             await this.deps.lowLevelCoordinator.sendNode(offer.node);
             if (this.destroyed)
