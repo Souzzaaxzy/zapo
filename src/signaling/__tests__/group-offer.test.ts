@@ -389,7 +389,7 @@ test('a plain group offer marks no voice chat', async () => {
     )
 })
 
-test('a voice chat flags itself, announces silence, and ships NO roster', async () => {
+test('a voice chat flags itself, announces silence, and ships the roster', async () => {
     const { node, participants } = await buildGroupOfferStanza(
         createDeps(),
         CALL_ID,
@@ -416,31 +416,30 @@ test('a voice chat flags itself, announces silence, and ships NO roster', async 
         'the audio rates are announced either way'
     )
 
-    // A voice chat rings nobody, so it names nobody: the roster is what hit the server's
-    // bound (`427` when long, `404` when short). Only the caller is listed locally.
-    assert.equal(
-        children.some((child) => child.tag === 'group_info'),
-        false,
-        'a voice chat ships NO group_info'
-    )
-    assert.equal(participants.length, 1, 'only the caller is on the local composition')
+    // The roster is REQUIRED, voice chat or not: it is the caller's best known device set
+    // and the server needs it to fan the offer. Omitting it is accepted and creates nothing.
+    const groupInfo = children.find((child) => child.tag === 'group_info')
+    assert.ok(groupInfo, 'a voice chat SHIPS the roster')
+    assert.equal((groupInfo?.content as BinaryNode[]).length, 3, 'criador + 2 convidados')
+    assert.equal(participants.length, 3, 'a composicao local tem os tres')
 })
 
-test('a voice chat starts in a group of any size (no roster, no device lookups)', async () => {
+test('a voice chat in a huge group ships the capped roster (nunca mais que 127)', async () => {
     const pedidos: string[][] = []
     const deps = createDeps(async (jids) => {
         pedidos.push([...jids])
         return jids.map((jid) => ({ jid, deviceJids: [`${jid.split('@')[0]}:1@lid`] }))
     })
     const many = Array.from({ length: 400 }, (_, i) => ({ jid: `200000000000${i}@lid` }))
-    const { node } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false, true)
+    const { node, participants } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false, true)
     const offer = offerNode(node)
-
+    const groupInfo = (offer.content as BinaryNode[]).find((child) => child.tag === 'group_info')
     assert.equal(offer.attrs.lightweight, '1')
     assert.equal(
-        (offer.content as BinaryNode[]).some((child) => child.tag === 'group_info'),
-        false,
-        'nenhum roster, seja o grupo de 3 ou de 400'
+        (groupInfo?.content as BinaryNode[]).length,
+        0x7f,
+        'o roster vai, mas nunca passa de 127 contas'
     )
-    assert.equal(pedidos.flat().length, 0, 'nem resolve device: nao ha quem tocar')
+    assert.equal(participants.length, 0x7f)
+    assert.ok(pedidos.flat().length <= 0x7f - 1, 'so resolve device das contas que cabem')
 })
