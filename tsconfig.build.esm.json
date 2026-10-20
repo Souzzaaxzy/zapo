@@ -1,0 +1,16 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "rootDir": "src",
+        "outDir": "dist/esm",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "noEmit": false,
+        "lib": ["ES2020", "DOM"],
+        "declaration": false,
+        "declarationMap": false,
+        "sourceMap": false
+    },
+    "include": ["src"],
+    "exclude": ["src/**/__tests__/**"]
+}
