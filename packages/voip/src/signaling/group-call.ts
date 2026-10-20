@@ -76,14 +76,16 @@ export async function buildGroupOfferStanza(
     }
 
     const creatorKey = groupParticipantAccountKey(callCreator)
-    // Cap BEFORE resolving devices: a group of hundreds would otherwise resolve every
-    // device (a fan-out lookup per account) only to throw all but the last 127 away. The
-    // creator takes the first slot, so at most `WA_GROUP_OFFER_MAX_ACCOUNTS - 1` others fit.
-    const candidates = participants
-        .filter((participant) => groupParticipantAccountKey(participant.jid) !== creatorKey)
-        .slice(0, WA_GROUP_OFFER_MAX_ACCOUNTS - 1)
+    // A VOICE CHAT rings nobody, so it resolves nobody: no device lookup, no roster. A call
+    // that rings caps its candidates BEFORE resolving devices, so a group of hundreds does
+    // not resolve every device (a fan-out lookup per account) only to drop most of them.
+    const candidates = isLightweight
+        ? []
+        : participants
+              .filter((participant) => groupParticipantAccountKey(participant.jid) !== creatorKey)
+              .slice(0, WA_GROUP_OFFER_MAX_ACCOUNTS - 1)
     const resolved = await resolveOfferParticipantDevices(deps, candidates, log)
-    if (resolved.length === 0) {
+    if (!isLightweight && resolved.length === 0) {
         throw new Error(`group call on ${groupJid} has no participant to ring`)
     }
 
@@ -103,18 +105,22 @@ export async function buildGroupOfferStanza(
         users.push(buildGroupUserNode(entry))
     }
 
+    // A VOICE CHAT ships NO roster: it rings nobody, so there is no one to name, and the
+    // server fills the membership from its answer. That is the shape the official client
+    // emits (its outbound offer takes the roster as optional and leaves it out for a group),
+    // and it is what lets a voice chat start in a group of any size: naming members is what
+    // hit the roster bound (`error: '427'`) and what the server refused when the list was
+    // short (`error: '404'`). A call that RINGS still names who it rings.
+    const offerAttrs: Record<string, string> = isLightweight
+        ? { 'group-jid': groupJid, is_lightweight: '1', lightweight: '1' }
+        : { 'group-jid': groupJid }
+    const offerContent = buildOfferMediaNodes(isVideo, isLightweight)
+    if (!isLightweight) {
+        offerContent.push({ tag: 'group_info', attrs: {}, content: users })
+    }
+
     return {
-        node: callStanza(
-            toCallServerJid(callId),
-            'offer',
-            callId,
-            callCreator,
-            isLightweight ? { 'group-jid': groupJid, lightweight: '1' } : { 'group-jid': groupJid },
-            [
-                ...buildOfferMediaNodes(isVideo, isLightweight),
-                { tag: 'group_info', attrs: {}, content: users }
-            ]
-        ),
+        node: callStanza(toCallServerJid(callId), 'offer', callId, callCreator, offerAttrs, offerContent),
         participants: listed
     }
 }
