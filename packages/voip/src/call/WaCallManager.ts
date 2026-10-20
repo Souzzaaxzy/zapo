@@ -264,11 +264,13 @@ export class WaCallManager extends EventEmitter {
         // At `warn` so it is always visible: the roster size the offer actually named is the
         // number that decides whether the server accepts it, and the caller's own count (the
         // group size) is a different one. Seeing both is what tells the two apart.
+        const rosterNode = findNodeChild(offer.node, 'group_info')
         this.logger.warn('group offer sent', {
             callId,
             groupJid,
-            accountsNamed: offer.participants.length,
-            voiceChat: options.isLightweight === true
+            voiceChat: options.isLightweight === true,
+            rosterShipped: rosterNode !== undefined,
+            rosterAccounts: Array.isArray(rosterNode?.content) ? rosterNode.content.length : 0
         })
 
         return callId
