@@ -317,6 +317,44 @@ test('a group offer needs a jid of ours to name as its call-creator', async () =
     )
 })
 
+test('a voice chat names only ourselves, whatever the group size', async () => {
+    // Um chat de voz NAO toca ninguem: quem quiser entra pelo cartao. Nomear o
+    // grupo inteiro seria inutil e passaria do teto de toque da plataforma -- era
+    // o que impedia o chat de voz num grupo grande. O offer leva so' o criador; o
+    // servidor preenche o roster na resposta.
+    const many = Array.from({ length: 200 }, (_, i) => ({ jid: `2000000000000${i}@lid` }))
+    const { node, participants } = await buildGroupOfferStanza(
+        createDeps(),
+        CALL_ID,
+        GROUP_JID,
+        many,
+        false,
+        true
+    )
+    const offer = offerNode(node)
+    const groupInfo = (offer.content as BinaryNode[]).find((child) => child.tag === 'group_info')
+    const users = groupInfo?.content as BinaryNode[]
+
+    assert.equal(offer.attrs.lightweight, '1')
+    assert.equal(users.length, 1, 'so o criador e listado')
+    assert.equal(users[0].attrs.jid, '50062877036657@lid', 'e o criador e quem esta listado')
+    assert.equal(participants.length, 1, 'a composicao inicial e so o criador')
+})
+
+test('a voice chat with nobody to ring is still placed', async () => {
+    // Sem convidados, uma CHAMADA seria recusada ("no participant to ring"); um
+    // chat de voz nao, porque nao toca ninguem.
+    const { node } = await buildGroupOfferStanza(
+        createDeps(),
+        CALL_ID,
+        GROUP_JID,
+        [],
+        false,
+        true
+    )
+    assert.equal(offerNode(node).attrs.lightweight, '1')
+})
+
 test('a plain group offer marks no voice chat', async () => {
     const { node } = await buildGroupOfferStanza(
         createDeps(),
