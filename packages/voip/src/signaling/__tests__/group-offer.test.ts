@@ -317,9 +317,9 @@ test('a group offer needs a jid of ours to name as its call-creator', async () =
     )
 })
 
-test('a group offer never names more than the server roster bound (127 accounts)', async () => {
+test('a group offer never names more than the server call ceiling (32 accounts)', async () => {
     // MEDIDO: o servidor recusa o offer que nomeia mais contas que o limite do
-    // roster oficial (`GroupInfoStanza.MAX_PARTICIPANTS = 0x7f`) com
+    // teto da call (`group_call_max_participants`, 32 por padrao) com
     // `error: '427'` -- o caso de um grupo de 128 membros (o criador conta).
     const many = Array.from({ length: 300 }, (_, i) => ({ jid: `200000000000${i}@lid` }))
     const { node, participants } = await buildGroupOfferStanza(
@@ -333,8 +333,8 @@ test('a group offer never names more than the server roster bound (127 accounts)
     const groupInfo = (offer.content as BinaryNode[]).find((child) => child.tag === 'group_info')
     const users = groupInfo?.content as BinaryNode[]
 
-    assert.equal(users.length, 0x7f, 'no maximo 127 contas no group_info')
-    assert.equal(participants.length, 0x7f, 'e a composicao inicial tambem')
+    assert.equal(users.length, 32, 'no maximo 32 contas no group_info')
+    assert.equal(participants.length, 32, 'e a composicao inicial tambem')
     assert.equal(users[0].attrs.jid, '50062877036657@lid', 'o criador segue primeiro')
 })
 
@@ -350,11 +350,11 @@ test('a huge group only resolves devices for the accounts that fit the offer', a
     const many = Array.from({ length: 400 }, (_, i) => ({ jid: `200000000000${i}@lid` }))
     const { participants } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false)
 
-    assert.equal(participants.length, 0x7f, 'o offer leva no maximo 127 contas')
+    assert.equal(participants.length, 32, 'o offer leva no maximo 32 contas')
     const resolvidas = pedidos.flat().length
     assert.ok(
-        resolvidas <= 0x7f - 1,
-        `resolveu no maximo 126 contas (o criador ocupa a primeira), veio ${resolvidas}`
+        resolvidas <= 32 - 1,
+        `resolveu no maximo 31 contas (o criador ocupa a primeira), veio ${resolvidas}`
     )
 })
 
@@ -428,7 +428,7 @@ test('a voice chat flags itself, announces silence, and ships the roster', async
     assert.equal(participants.length, 3, 'a composicao local tem os tres')
 })
 
-test('a voice chat in a huge group ships the capped roster (nunca mais que 127)', async () => {
+test('a voice chat in a huge group ships the capped roster (nunca mais que 32)', async () => {
     const pedidos: string[][] = []
     const deps = createDeps(async (jids) => {
         pedidos.push([...jids])
@@ -441,9 +441,9 @@ test('a voice chat in a huge group ships the capped roster (nunca mais que 127)'
     assert.equal(offer.attrs.lightweight, '1')
     assert.equal(
         (groupInfo?.content as BinaryNode[]).length,
-        0x7f,
-        'o roster vai, mas nunca passa de 127 contas'
+        32,
+        'o roster vai, mas nunca passa de 32 contas'
     )
-    assert.equal(participants.length, 0x7f)
-    assert.ok(pedidos.flat().length <= 0x7f - 1, 'so resolve device das contas que cabem')
+    assert.equal(participants.length, 32)
+    assert.ok(pedidos.flat().length <= 32 - 1, 'so resolve device das contas que cabem')
 })
