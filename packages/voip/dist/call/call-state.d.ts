@@ -112,6 +112,12 @@ export declare class CallInfo {
     get isGroupCall(): boolean;
     set isGroupCall(value: boolean);
     private markedGroupCall;
+    /**
+     * A voice chat: a group call placed `lightweight`, which announces `<silence>` instead of
+     * media and never rings. Its members are silent on purpose until someone speaks, so a quiet
+     * sender must not be reported invisible; see {@link WaGroupLiveness}.
+     */
+    isLightweight: boolean;
     get canAccept(): boolean;
     get isAcceptBlocked(): boolean;
     get canReject(): boolean;

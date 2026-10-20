@@ -90,8 +90,14 @@ class WaGroupLiveness {
     /**
      * Reports invisible, once, each connected member none of whose devices was heard for
      * {@link PEER_INVISIBLE_AFTER_MS}; nobody while nobody at all is heard, our own path down.
+     *
+     * A voice chat is exempt: its members announce `<silence>` and stay quiet until they speak, so
+     * silence says nothing about them. Reporting one would have the server expel a member who is
+     * simply not talking, which is what makes a voice chat drop the people who joined it.
      */
     sweepInvisibleSenders() {
+        if (this.info.isLightweight)
+            return;
         const media = this.info.participantMedia;
         if (!this.hearsAnySender())
             return;

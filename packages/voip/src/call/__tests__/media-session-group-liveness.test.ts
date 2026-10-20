@@ -4,7 +4,9 @@ import { test } from 'node:test'
 import type { BinaryNode } from 'zapo-js/transport'
 
 import { WaVoipSettings } from '../../signaling/voip-settings.js'
-import { type WaCallGroupParticipant } from '../group-participants.js'
+import { CallMediaType } from '../../types.js'
+import { CallInfo } from '../call-state.js'
+import { createGroupComposition, type WaCallGroupParticipant } from '../group-participants.js'
 
 import {
     activeGroupSession,
@@ -12,11 +14,14 @@ import {
     CONNECTED,
     createSession,
     FOURTH,
+    GROUP_JID,
     groupUpdate,
     ID,
     innerOf,
     offerRelayData,
+    PEER,
     PEER_DEVICE,
+    SELF_DEVICE,
     sentWithTag,
     THIRD,
     THIRD_KEY,
@@ -191,4 +196,37 @@ test('a connected member listed with no device is never reported invisible', asy
     ).liveness.sweepInvisibleSenders()
 
     assert.deepEqual(sentWithTag(harness, 'peer_state'), [])
+})
+
+test('a voice chat never reports its quiet members invisible', async () => {
+    const info = CallInfo.newOutgoing(ID, PEER, SELF_DEVICE, CallMediaType.Audio)
+    info.groupJid = GROUP_JID
+    info.joinable = true
+    info.isLightweight = true
+    info.groupComposition = createGroupComposition(THREE_WAY)
+    const harness = await createSession({ info })
+    // An outgoing call reaches Active through offer_sent then remote_accepted.
+    info.applyTransition({ type: 'offer_sent' })
+    info.applyTransition({ type: 'remote_accepted' })
+    info.applyTransition({ type: 'media_connected' })
+    await harness.session.applyCallKey(CALL_KEY, 1)
+    const senderOf = (device: string) =>
+        [...harness.call.groupSenders].find(([, jid]) => jid === device)?.[0] as string
+    const sweep = () =>
+        (
+            harness.session as unknown as { liveness: { sweepInvisibleSenders(): void } }
+        ).liveness.sweepInvisibleSenders()
+
+    // One member is heard, so the sweep would otherwise accuse the quiet one.
+    harness.session.handleSenderMedia(senderOf(PEER_DEVICE), true)
+    sweep()
+    harness.clock.now += 25_000
+    sweep()
+    sweep()
+
+    assert.deepEqual(
+        sentWithTag(harness, 'peer_state'),
+        [],
+        'a voice chat stays quiet on purpose; nobody is accused of being invisible'
+    )
 })

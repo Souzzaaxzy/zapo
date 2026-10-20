@@ -228,6 +228,13 @@ export class CallInfo {
 
     private markedGroupCall = false
 
+    /**
+     * A voice chat: a group call placed `lightweight`, which announces `<silence>` instead of
+     * media and never rings. Its members are silent on purpose until someone speaks, so a quiet
+     * sender must not be reported invisible; see {@link WaGroupLiveness}.
+     */
+    isLightweight = false
+
     get canAccept(): boolean {
         return this.stateData.state === CallState.IncomingRinging && !this.stateData.acceptBlocked
     }

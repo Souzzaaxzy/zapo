@@ -119,6 +119,7 @@ class WaCallManager extends node_events_1.EventEmitter {
         const info = call_state_js_1.CallInfo.newOutgoing(callId, firstPeer.jid, callCreator, mediaType);
         info.groupJid = groupJid;
         info.joinable = true;
+        info.isLightweight = options.isLightweight ?? false;
         const session = this.createSession(info);
         session.seedOutgoingGroupComposition(offer.participants);
         this.applyPendingCallKey(session);

@@ -16,6 +16,12 @@ class CallInfo {
         /** Media sender id to the device jid it stands for (device 0 bare), on a group call. */
         this.groupSenders = new Map();
         this.markedGroupCall = false;
+        /**
+         * A voice chat: a group call placed `lightweight`, which announces `<silence>` instead of
+         * media and never rings. Its members are silent on purpose until someone speaks, so a quiet
+         * sender must not be reported invisible; see {@link WaGroupLiveness}.
+         */
+        this.isLightweight = false;
         this.callId = init.callId;
         this.peerJid = init.peerJid;
         this.callCreator = init.callCreator;
