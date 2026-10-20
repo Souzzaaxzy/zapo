@@ -140,10 +140,14 @@ class WaCallManager extends node_events_1.EventEmitter {
             info.applyTransition({ type: 'offer_sent' });
             this.reporter.emitState(info);
         }
-        this.logger.debug('outgoing group offer sent', {
+        // At `warn` so it is always visible: the roster size the offer actually named is the
+        // number that decides whether the server accepts it, and the caller's own count (the
+        // group size) is a different one. Seeing both is what tells the two apart.
+        this.logger.warn('group offer sent', {
             callId,
             groupJid,
-            participantCount: offer.participants.length
+            accountsNamed: offer.participants.length,
+            voiceChat: options.isLightweight === true
         });
         return callId;
     }

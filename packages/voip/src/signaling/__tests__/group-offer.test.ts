@@ -428,22 +428,37 @@ test('a voice chat flags itself, announces silence, and ships the roster', async
     assert.equal(participants.length, 3, 'a composicao local tem os tres')
 })
 
-test('a voice chat in a huge group ships the capped roster (nunca mais que 32)', async () => {
+test('a voice chat too big for the call ceiling ships NO roster', async () => {
+    // Um grupo que nao cabe no teto da call (32) nao pode ser nomeado inteiro. Um chat de
+    // voz NAO toca ninguem, entao nao ha quem nomear: ele vai SEM roster e o servidor
+    // preenche a composicao na resposta. (A chamada que TOCA corta em 32.)
     const pedidos: string[][] = []
     const deps = createDeps(async (jids) => {
         pedidos.push([...jids])
         return jids.map((jid) => ({ jid, deviceJids: [`${jid.split('@')[0]}:1@lid`] }))
     })
     const many = Array.from({ length: 400 }, (_, i) => ({ jid: `200000000000${i}@lid` }))
-    const { node, participants } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false, true)
+    const { node } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false, true)
+    const offer = offerNode(node)
+    assert.equal(offer.attrs.lightweight, '1', 'o marcador vai')
+    assert.equal(
+        (offer.content as BinaryNode[]).some((child) => child.tag === 'group_info'),
+        false,
+        'sem roster: nao ha quem nomear num chat de voz'
+    )
+    assert.equal(pedidos.flat().length, 0, 'nem resolve device')
+})
+test('a voice chat that FITS the ceiling still ships its roster', async () => {
+    const pedidos: string[][] = []
+    const deps = createDeps(async (jids) => {
+        pedidos.push([...jids])
+        return jids.map((jid) => ({ jid, deviceJids: [`${jid.split('@')[0]}:1@lid`] }))
+    })
+    const few = Array.from({ length: 20 }, (_, i) => ({ jid: `200000000000${i}@lid` }))
+    const { node } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, few, false, true)
     const offer = offerNode(node)
     const groupInfo = (offer.content as BinaryNode[]).find((child) => child.tag === 'group_info')
-    assert.equal(offer.attrs.lightweight, '1')
-    assert.equal(
-        (groupInfo?.content as BinaryNode[]).length,
-        32,
-        'o roster vai, mas nunca passa de 32 contas'
-    )
-    assert.equal(participants.length, 32)
-    assert.ok(pedidos.flat().length <= 32 - 1, 'so resolve device das contas que cabem')
+    assert.ok(groupInfo, 'um chat de voz que CABE nomeia quem ele endereca')
+    assert.equal((groupInfo?.content as BinaryNode[]).length, 21, 'criador + 20')
+    assert.ok(pedidos.flat().length > 0, 'e resolve os devices')
 })
