@@ -1,0 +1,26 @@
+import type { WaSessionStore } from '../contracts/session.store';
+import type { WithDestroyLifecycle } from '../types';
+import { type IdleExpiry } from '../../util/collections';
+/**
+ * Read-through / write-through in-process cache for a persistent session
+ * backend. Reuses {@link WaSessionMemoryStore} as the bounded L1 so that
+ * repeated reads of the same peer on the send/recv path skip the backend
+ * round-trip. Without `expiry` the cap evicts the least recently written
+ * entry; with it, the least recently used, and entries idle past the TTL
+ * leave the L1 (never the backend) and are re-read on next use.
+ *
+ * Coherence model (single process):
+ * - every mutation (set/delete/clear) writes the backend then the L1 in
+ *   lock-step and bumps a generation counter;
+ * - a read only populates the L1 when no mutation interleaved its backend
+ *   fetch (generation unchanged) and the slot is still empty, so an in-flight
+ *   read can never resurrect a concurrently deleted entry nor overwrite a
+ *   fresher concurrent write;
+ * - there is no negative caching: a miss always re-hits the backend.
+ *
+ * This cache assumes a single writer per `sessionId` (the library's
+ * connection model). Do not share one backend across processes for the same
+ * session with the cache enabled - there is no cross-process invalidation
+ * channel, so another process's writes would leave this L1 stale.
+ */
+export declare function withSessionCache(backend: WaSessionStore, maxEntries?: number, expiry?: IdleExpiry): WithDestroyLifecycle<WaSessionStore>;

@@ -1,0 +1,149 @@
+import { isOwnAccountJid, parseJidFull } from '../../protocol/jid.js';
+import { WA_MESSAGE_TAGS } from '../../protocol/message.js';
+import { WA_NODE_TAGS } from '../../protocol/nodes.js';
+const TAG_TO_KIND = {
+    [WA_MESSAGE_TAGS.MESSAGE]: 'message',
+    [WA_MESSAGE_TAGS.RECEIPT]: 'receipt',
+    [WA_NODE_TAGS.NOTIFICATION]: 'notification',
+    [WA_NODE_TAGS.PRESENCE]: 'presence',
+    [WA_NODE_TAGS.CHATSTATE]: 'chatstate',
+    [WA_NODE_TAGS.CALL]: 'call'
+};
+export function validateIgnoreKey(d) {
+    if (d.remoteJid === undefined &&
+        d.fromMe === undefined &&
+        d.id === undefined &&
+        d.participant === undefined) {
+        throw new Error('ignoreKey: at least one match field required');
+    }
+    if (Array.isArray(d.remoteJid) && d.remoteJid.length === 0) {
+        throw new Error('ignoreKey: remoteJid array is empty');
+    }
+    if (d.only !== undefined && d.only.length === 0) {
+        throw new Error('ignoreKey: only array is empty');
+    }
+}
+function tryParseJid(jid) {
+    if (!jid)
+        return null;
+    try {
+        return parseJidFull(jid);
+    }
+    catch {
+        return null;
+    }
+}
+function matchesAnyJid(actual, candidates) {
+    const a = tryParseJid(actual);
+    if (a === null)
+        return false;
+    for (const c of candidates) {
+        if (tryParseJid(c)?.userJid === a.userJid)
+            return true;
+    }
+    return false;
+}
+function collectFromCandidates(kind, attrs) {
+    const list = [];
+    if (attrs.from)
+        list.push(attrs.from);
+    if (kind === 'message') {
+        if (attrs.sender_pn)
+            list.push(attrs.sender_pn);
+        if (attrs.sender_lid)
+            list.push(attrs.sender_lid);
+    }
+    else if (kind === 'call' && attrs.sender_lid) {
+        list.push(attrs.sender_lid);
+    }
+    return list;
+}
+function collectParticipantCandidates(kind, attrs) {
+    const list = [];
+    if (attrs.participant)
+        list.push(attrs.participant);
+    if (kind === 'message') {
+        if (attrs.participant_pn)
+            list.push(attrs.participant_pn);
+        if (attrs.participant_lid)
+            list.push(attrs.participant_lid);
+    }
+    return list;
+}
+/**
+ * Builds the parsed context handed to a {@link WaIgnoreKeyPredicate}. Returns
+ * `null` when the node's tag is not one of the addressable kinds (`<iq>`, etc.).
+ */
+export function extractIgnoreKeyContext(node, meJid) {
+    const kind = TAG_TO_KIND[node.tag];
+    if (kind === undefined)
+        return null;
+    const a = node.attrs;
+    const me = tryParseJid(meJid);
+    const fromCandidates = collectFromCandidates(kind, a);
+    const fromMe = me !== null && fromCandidates.some((f) => tryParseJid(f)?.address.user === me.address.user);
+    // Device-stripped to match the JID form used by events/keys; a userless
+    // server `from` like `s.whatsapp.net` is unparseable, so fall back to raw.
+    return {
+        kind,
+        remoteJid: tryParseJid(a.from)?.userJid ?? a.from ?? null,
+        fromMe,
+        id: a.id,
+        participant: tryParseJid(a.participant)?.userJid ?? a.participant ?? null
+    };
+}
+/** Pure matcher. Exported for direct testing without a coordinator. */
+export function matchesIgnoreKey(node, d, meJid) {
+    const ctx = extractIgnoreKeyContext(node, meJid);
+    if (ctx === null)
+        return false;
+    if (d.only !== undefined && !d.only.includes(ctx.kind))
+        return false;
+    const a = node.attrs;
+    const fromCandidates = collectFromCandidates(ctx.kind, a);
+    if (d.remoteJid !== undefined) {
+        const candidates = Array.isArray(d.remoteJid) ? d.remoteJid : [d.remoteJid];
+        if (!fromCandidates.some((f) => matchesAnyJid(f, candidates)))
+            return false;
+    }
+    if (d.participant !== undefined) {
+        const pCandidates = collectParticipantCandidates(ctx.kind, a);
+        if (!pCandidates.some((p) => matchesAnyJid(p, [d.participant])))
+            return false;
+    }
+    if (d.id !== undefined && ctx.id !== d.id)
+        return false;
+    if (d.fromMe !== undefined && d.fromMe !== ctx.fromMe)
+        return false;
+    return true;
+}
+/**
+ * A `category='peer'` message from our own account is traffic between our own
+ * devices (app-state key share, history sync, PDO responses), not a chat
+ * message, so it has no key to ignore by. Dropping it starves the protocol:
+ * app-state collections stay blocked on a key whose share never gets through.
+ * The own-account check keeps a foreign sender from dodging a filter by
+ * stamping the attribute.
+ */
+function isOwnPeerMessage(node, me) {
+    if (node.tag !== WA_MESSAGE_TAGS.MESSAGE || node.attrs.category !== 'peer' || !me) {
+        return false;
+    }
+    const from = node.attrs.from;
+    return !!from && tryParseJid(from) !== null && isOwnAccountJid(from, me.meJid, me.meLid);
+}
+export function createIgnoreKeyFilter(input, getMe) {
+    if (typeof input === 'function') {
+        return (node) => {
+            const me = getMe();
+            if (isOwnPeerMessage(node, me))
+                return false;
+            const ctx = extractIgnoreKeyContext(node, me?.meJid);
+            return ctx !== null && input(ctx);
+        };
+    }
+    return (node) => {
+        const me = getMe();
+        return !isOwnPeerMessage(node, me) && matchesIgnoreKey(node, input, me?.meJid);
+    };
+}
