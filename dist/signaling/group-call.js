@@ -18,13 +18,15 @@ const lifecycle_js_1 = require("./lifecycle.js");
 /**
  * The most accounts a group `<offer>`'s `<group_info>` may name, ourselves included.
  *
- * Measured: the server refuses an offer that names more, with `error: '427'` on the
- * `<ack>` (`handleCallAck` -> `SetupFailed`). The ceiling is the roster bound the
- * official client enforces (`GroupInfoStanza.MAX_PARTICIPANTS = 0x7f`), not the
- * 32-participant limit of a *connected* call: a group of 128 members overflows it by
- * one, because the creator counts. Naming fewer is always accepted.
+ * This is the server's group-call participant ceiling, the `group_call_max_participants`
+ * AB prop (32 by default), not the 127-entry wire bound on a `<group_info>` element: the
+ * server refuses an offer that names more than the call may hold, with `error: '427'` and
+ * `error: '412'` on the `<ack>` (`handleCallAck` -> `SetupFailed`). Measured: 32 is
+ * accepted, 127 is refused. The official client applies the same gate before placing a
+ * group call. Naming fewer is always accepted, so a larger group still starts and the
+ * rest joins from the app.
  */
-exports.WA_GROUP_OFFER_MAX_ACCOUNTS = 0x7f;
+exports.WA_GROUP_OFFER_MAX_ACCOUNTS = 32;
 function buildGroupUserNode(participant, capability) {
     return {
         tag: 'user',
