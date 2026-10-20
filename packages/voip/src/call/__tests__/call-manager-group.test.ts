@@ -627,3 +627,42 @@ test('a call key ahead of a roster-only group offer keys the call once the offer
     assert.equal(call?.isGroupCall, true)
     assert.deepEqual(call?.encryptionKey, CALL_KEY)
 })
+
+test('a voice chat too big for the call ceiling is placed WITHOUT a roster', async () => {
+    // O bug que este teste trava: o offer ia sem roster (nao ha quem nomear), mas o manager
+    // ainda exigia um `firstPeer` e lancava
+    // "a group call on <jid> needs the participants to ring" -- o comando falhava com
+    // "o motor de midia nao subiu" em vez de subir o chat de voz.
+    const mock = createMock()
+    const manager = createManager(mock)
+    const many = Array.from({ length: 40 }, (_, i) => ({ jid: `5000000000${i}@lid` }))
+
+    const callId = await manager.startCall({
+        groupJid: GROUP_JID,
+        participants: many,
+        isLightweight: true
+    })
+
+    assert.ok(callId, 'o chat de voz subiu num grupo que nao cabe')
+    const offer = mock.sent.find((node) => innerOf(node).tag === 'offer')
+    assert.ok(offer, 'o offer saiu')
+    const inner = innerOf(offer)
+    assert.equal(inner.attrs.lightweight, '1', 'marcado como voice chat')
+    assert.equal(
+        (inner.content as BinaryNode[]).some((child) => child.tag === 'group_info'),
+        false,
+        'sem roster: nao ha quem nomear'
+    )
+    const call = manager.getCall(callId)
+    assert.equal(call?.isLightweight, true)
+    assert.equal(call?.groupJid, GROUP_JID)
+})
+
+test('a call that RINGS with nobody to ring is still refused', async () => {
+    const mock = createMock()
+    const manager = createManager(mock)
+    await assert.rejects(
+        () => manager.startCall({ groupJid: GROUP_JID, participants: [] }),
+        /needs the participants to ring/
+    )
+})

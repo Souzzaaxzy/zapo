@@ -106,14 +106,19 @@ export class WaCallManager extends EventEmitter {
         const callId = generateCallId();
         const mediaType = options.isVideo ? CallMediaType.Video : CallMediaType.Audio;
         const callCreator = selfJidOf(this.deps);
+        const isLightweight = options.isLightweight ?? false;
         const offer = await buildGroupOfferStanza(this.deps, callId, groupJid, participants, options.isVideo ?? false, options.isLightweight ?? false, this.signalingLogger);
         this.throwIfDestroyed();
         const creatorKey = groupParticipantAccountKey(callCreator);
         const firstPeer = offer.participants.find((participant) => groupParticipantAccountKey(participant.jid) !== creatorKey);
-        if (!firstPeer) {
+        // A voice chat whose group does not fit ships NO roster, so there is no peer to address:
+        // the call itself is the target, as a group accept uses. Only a call that rings, or a
+        // voice chat that fits and named someone, needs a peer.
+        if (!firstPeer && !isLightweight) {
             throw new Error(`a group call on ${groupJid} needs the participants to ring`);
         }
-        const info = CallInfo.newOutgoing(callId, firstPeer.jid, callCreator, mediaType);
+        const peerJid = firstPeer?.jid ?? toCallServerJid(callId);
+        const info = CallInfo.newOutgoing(callId, peerJid, callCreator, mediaType);
         info.groupJid = groupJid;
         info.joinable = true;
         info.isLightweight = options.isLightweight ?? false;
@@ -122,7 +127,7 @@ export class WaCallManager extends EventEmitter {
         this.applyPendingCallKey(session);
         this.reporter.markAnnounced(info);
         try {
-            await session.initMedia(callCreator, firstPeer.devices[0] ?? firstPeer.jid);
+            await session.initMedia(callCreator, firstPeer?.devices[0] ?? peerJid);
             this.throwIfDestroyed();
             await this.deps.lowLevelCoordinator.sendNode(offer.node);
             if (this.destroyed)
