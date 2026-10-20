@@ -85,19 +85,18 @@ async function buildGroupOfferStanza(deps, callId, groupJid, participants, isVid
         listed.push(entry);
         users.push(buildGroupUserNode(entry));
     }
-    // The roster is REQUIRED, voice chat or not: it is the caller's best known device set,
-    // and it is what lets the server fan the offer to the participants at all. An offer that
-    // omits it is accepted and then creates nothing -- no card, no call. What is capped is
-    // its size (`WA_GROUP_OFFER_MAX_ACCOUNTS`): the server refuses a longer roster with
-    // `error: '427'`, which is what kept a group of 128 out (the creator counts).
+    // The offer carries exactly two things that make a voice chat, and nothing else: the
+    // `lightweight='1'` marker and the `<silence>` node `buildOfferMediaNodes` adds. Adding
+    // further attributes is not free -- an attribute the server does not know makes it drop
+    // the offer, and the call is accepted and then never appears.
     //
-    // The marker goes out under both spellings: `is_lightweight` is the one the official
-    // client uses, `lightweight` is the one this package always wrote.
-    const offerAttrs = isLightweight
-        ? { 'group-jid': groupJid, is_lightweight: '1', lightweight: '1' }
-        : { 'group-jid': groupJid };
+    // The roster is REQUIRED, voice chat or not: it is the caller's best known device set,
+    // and it is what lets the server fan the offer to the participants at all. Omitting it
+    // is accepted and then creates nothing. What is capped is its SIZE
+    // (`WA_GROUP_OFFER_MAX_ACCOUNTS`): a longer roster is refused with `error: '427'`,
+    // which is what kept a group of 128 out (the creator takes a slot).
     return {
-        node: (0, call_stanza_js_1.callStanza)((0, call_stanza_js_1.toCallServerJid)(callId), 'offer', callId, callCreator, offerAttrs, [
+        node: (0, call_stanza_js_1.callStanza)((0, call_stanza_js_1.toCallServerJid)(callId), 'offer', callId, callCreator, isLightweight ? { 'group-jid': groupJid, lightweight: '1' } : { 'group-jid': groupJid }, [
             ...(0, lifecycle_js_1.buildOfferMediaNodes)(isVideo, isLightweight),
             { tag: 'group_info', attrs: {}, content: users }
         ]),
