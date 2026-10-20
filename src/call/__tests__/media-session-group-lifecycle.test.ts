@@ -72,6 +72,77 @@ test('on a group call we placed, an accept connects once and sends nothing back'
     assert.equal(harness.link.sections('keys').length, 0)
 })
 
+test('a stale-roster nack (427) on a voice chat is answered with the roster it echoed', async () => {
+    // O servidor recusa um offer cujo device set ele considera velho com `427` e devolve o
+    // roster que quer, esperando o caller re-ofertar contra ele. Sem isso o chat de voz morre
+    // num grupo grande.
+    const info = CallInfo.newOutgoing(ID, PEER, SELF_DEVICE, CallMediaType.Audio)
+    info.groupJid = GROUP_JID
+    info.joinable = true
+    info.isLightweight = true
+    const harness = await createSession({ info })
+
+    await harness.session.handleCallAck({
+        tag: 'ack',
+        attrs: { class: 'call', type: 'offer', 'call-id': ID, error: '427' },
+        content: [
+            {
+                tag: 'group_info',
+                attrs: { media: 'audio', 'connected-limit': '32' },
+                content: toRoster([...THREE_WAY]).map((entry) => ({
+                    tag: 'user',
+                    attrs: { jid: entry.jid, ...(entry.state ? { state: entry.state } : {}) },
+                    content: entry.devices.map((jid) => ({ tag: 'device', attrs: { jid } }))
+                }))
+            }
+        ]
+    })
+
+    const offers = sentWithTag(harness, 'offer')
+    assert.equal(offers.length, 1, 're-ofertou uma vez com o roster do ack')
+    const roster = (innerOf(offers[0]).content as BinaryNode[]).find(
+        (child) => child.tag === 'group_info'
+    )
+    assert.ok(roster, 'o re-offer leva o roster')
+    assert.equal((roster?.content as BinaryNode[]).length, 3, 'o roster do ack, inteiro')
+    assert.deepEqual(harness.ended, [], 'a call NAO e encerrada no primeiro 427')
+})
+
+test('a second stale-roster nack ends the call (no retry loop)', async () => {
+    const info = CallInfo.newOutgoing(ID, PEER, SELF_DEVICE, CallMediaType.Audio)
+    info.groupJid = GROUP_JID
+    info.joinable = true
+    info.isLightweight = true
+    const harness = await createSession({ info })
+    harness.call.applyTransition({ type: 'offer_sent' })
+    const nack: BinaryNode = {
+        tag: 'ack',
+        attrs: { class: 'call', type: 'offer', 'call-id': ID, error: '427' },
+        content: [
+            {
+                tag: 'group_info',
+                attrs: { media: 'audio', 'connected-limit': '32' },
+                content: toRoster([...THREE_WAY]).map((entry) => ({
+                    tag: 'user',
+                    attrs: { jid: entry.jid, ...(entry.state ? { state: entry.state } : {}) },
+                    content: entry.devices.map((jid) => ({ tag: 'device', attrs: { jid } }))
+                }))
+            }
+        ]
+    }
+
+    await harness.session.handleCallAck(nack)
+    await harness.session.handleCallAck(nack)
+
+    assert.equal(sentWithTag(harness, 'offer').length, 1, 're-oferta UMA vez so')
+    assert.equal(harness.call.isEnded, true, 'e entao encerra (sem loop de re-offer)')
+    assert.equal(harness.call.stateData.endReason, EndCallReason.SetupFailed)
+    assert.deepEqual(
+        sentWithTag(harness, 'terminate').map((node) => innerOf(node).attrs.reason),
+        ['setup_failed']
+    )
+})
+
 test('the caller of a group call sends no preaccept on the offer ack', async () => {
     const harness = await createSession({ direction: 'outgoing' })
 

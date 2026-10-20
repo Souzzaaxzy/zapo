@@ -74,6 +74,10 @@ export declare class WaCallMediaSession {
     private readonly video;
     private initialTransportSent;
     private outgoingPreacceptSent;
+    /** A stale-roster offer is retried once with the roster the nack echoed. */
+    private reofferedRoster;
+    /** The last offer ack, kept so a stale-roster nack can be answered with its roster. */
+    private lastOfferAckNode;
     private acceptedByJid;
     private readonly now;
     /** Whether a repeated `<video>` transaction id is dropped rather than only logged. */
@@ -155,6 +159,16 @@ export declare class WaCallMediaSession {
      * a group call its `<relay>` is followed like a reissue.
      */
     handleCallTransport(node: BinaryNode): Promise<void>;
+    /**
+     * Re-sends the group offer with the roster the stale-roster nack (`427`) echoed.
+     *
+     * The server refuses an offer whose device set it considers stale and answers with the
+     * set it wants; the caller is expected to offer again against that. The echoed roster is
+     * parsed into the caller's participants, capped at the placement bound, and the offer is
+     * rebuilt exactly as the first one was. Returns whether the retry was sent: `false` when
+     * the ack carried no usable roster, so the caller ends the call as it always did.
+     */
+    private reofferWithAckRoster;
     handleCallAck(node: BinaryNode): Promise<void>;
     /**
      * Records the peer's relay latencies and sends nothing back: answering every one made two

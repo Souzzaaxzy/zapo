@@ -19,6 +19,8 @@ const types_js_1 = require("../types.js");
 const call_jids_js_1 = require("./call-jids.js");
 const call_state_js_1 = require("./call-state.js");
 const group_media_plan_js_1 = require("./group-media-plan.js");
+const jid_js_2 = require("../jid.js");
+const group_call_js_1 = require("../signaling/group-call.js");
 const group_participants_js_1 = require("./group-participants.js");
 const media_plan_js_1 = require("./media-plan.js");
 const WaCallAnnouncements_js_1 = require("./WaCallAnnouncements.js");
@@ -33,6 +35,8 @@ const WaGroupRoster_js_1 = require("./WaGroupRoster.js");
 const WaGroupVideoSubscriptions_js_1 = require("./WaGroupVideoSubscriptions.js");
 /** The `<terminate>` reason for an offer the server refused. */
 const SETUP_FAILED_REASON = 'setup_failed';
+/** The server's stale-roster nack: it echoes the roster to re-offer against. */
+const STALE_ROSTER_ERROR = '427';
 /** Stands in for the `<group_info>` of an update that carried none. */
 const NO_LISTED_PARTICIPANTS = [];
 /**
@@ -43,6 +47,10 @@ class WaCallMediaSession {
     constructor(options) {
         this.initialTransportSent = false;
         this.outgoingPreacceptSent = false;
+        /** A stale-roster offer is retried once with the roster the nack echoed. */
+        this.reofferedRoster = false;
+        /** The last offer ack, kept so a stale-roster nack can be answered with its roster. */
+        this.lastOfferAckNode = null;
         this.acceptedByJid = null;
         /** Whether a repeated `<video>` transaction id is dropped rather than only logged. */
         this.videoStateTxnEnforced = false;
@@ -500,6 +508,62 @@ class WaCallMediaSession {
         };
         await this.plan.publish({ relays: this.relays.section() });
     }
+    /**
+     * Re-sends the group offer with the roster the stale-roster nack (`427`) echoed.
+     *
+     * The server refuses an offer whose device set it considers stale and answers with the
+     * set it wants; the caller is expected to offer again against that. The echoed roster is
+     * parsed into the caller's participants, capped at the placement bound, and the offer is
+     * rebuilt exactly as the first one was. Returns whether the retry was sent: `false` when
+     * the ack carried no usable roster, so the caller ends the call as it always did.
+     */
+    async reofferWithAckRoster() {
+        const groupJid = this.info.groupJid;
+        if (!groupJid)
+            return false;
+        let roster;
+        try {
+            roster = (0, group_info_js_1.readGroupCallRoster)(this.lastOfferAckNode);
+        }
+        catch (err) {
+            this.logger.warn('stale roster ack carried an unreadable group_info', {
+                callId: this.info.callId,
+                message: (0, util_1.toError)(err).message
+            });
+            return false;
+        }
+        if (roster.kind !== 'roster')
+            return false;
+        const creatorKey = (0, jid_js_2.groupParticipantAccountKey)(this.info.callCreator);
+        const participants = [];
+        for (const participant of roster.participants) {
+            if ((0, group_participants_js_1.isGroupParticipantLeaving)(participant))
+                continue;
+            if ((0, jid_js_2.groupParticipantAccountKey)(participant.jid) === creatorKey)
+                continue;
+            if (participants.length >= group_call_js_1.WA_GROUP_OFFER_MAX_ACCOUNTS - 1)
+                break;
+            participants.push({ jid: participant.jid, devices: participant.devices });
+        }
+        if (participants.length === 0)
+            return false;
+        try {
+            const offer = await (0, group_call_js_1.buildGroupOfferStanza)(this.deps, this.info.callId, groupJid, participants, this.info.mediaType === types_js_1.CallMediaType.Video, this.info.isLightweight, this.logger);
+            await this.stanzas.send(offer.node);
+            this.logger.warn('offer re-sent with the roster the server asked for', {
+                callId: this.info.callId,
+                participants: participants.length
+            });
+            return true;
+        }
+        catch (err) {
+            this.logger.warn('re-offer with the ack roster failed', {
+                callId: this.info.callId,
+                message: (0, util_1.toError)(err).message
+            });
+            return false;
+        }
+    }
     async handleCallAck(node) {
         const ackType = node.attrs?.type;
         // A re-rung group offer comes with no relay: the ack of our accept may bring it.
@@ -509,8 +573,19 @@ class WaCallMediaSession {
         }
         if (ackType !== 'offer')
             return;
+        // Kept before the error branch: a stale-roster nack carries the roster to re-offer
+        // against, and that roster is read from this very ack.
+        this.lastOfferAckNode = node;
         const error = node.attrs?.error;
         if (error) {
+            // `427` is the server's STALE ROSTER nack: it echoes the device set it wants and
+            // expects the caller to re-offer against it. Retry once with that roster, capped
+            // as always; a second refusal, or any other error, ends the call.
+            if (error === STALE_ROSTER_ERROR && this.info.isLightweight && !this.reofferedRoster) {
+                this.reofferedRoster = true;
+                if (await this.reofferWithAckRoster())
+                    return;
+            }
             this.logger.warn('offer refused by the server, call ended', {
                 callId: this.info.callId,
                 error
