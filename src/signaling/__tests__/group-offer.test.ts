@@ -389,8 +389,8 @@ test('a plain group offer marks no voice chat', async () => {
     )
 })
 
-test('a lightweight group offer flags the voice chat and announces silence', async () => {
-    const { node } = await buildGroupOfferStanza(
+test('a voice chat flags itself, announces silence, and ships NO roster', async () => {
+    const { node, participants } = await buildGroupOfferStanza(
         createDeps(),
         CALL_ID,
         GROUP_JID,
@@ -400,17 +400,47 @@ test('a lightweight group offer flags the voice chat and announces silence', asy
     )
     const offer = offerNode(node)
 
-    assert.equal(offer.attrs.lightweight, '1', 'the voice chat flag is what the server reads')
+    assert.equal(offer.attrs.lightweight, '1', 'the voice chat flag the server reads')
+    assert.equal(offer.attrs.is_lightweight, '1', 'and the spelling the official client uses')
     assert.equal(offer.attrs['group-jid'], GROUP_JID, 'the group attribute is kept alongside it')
 
-    const silence = (offer.content as BinaryNode[]).find((child) => child.tag === 'silence')
+    const children = offer.content as BinaryNode[]
+    const silence = children.find((child) => child.tag === 'silence')
     assert.equal(silence?.attrs.reason, 'lightweight')
     // `<silence>` sits between the audio rates and `<net>`, as WhatsApp Web emits it.
-    const tags = (offer.content as BinaryNode[]).map((child) => child.tag)
-    assert.deepEqual(tags.indexOf('silence'), tags.indexOf('net') - 1)
+    const tags = children.map((child) => child.tag)
+    assert.equal(tags.indexOf('silence'), tags.indexOf('net') - 1)
     assert.equal(
-        (offer.content as BinaryNode[]).filter((child) => child.tag === 'audio').length,
+        children.filter((child) => child.tag === 'audio').length,
         2,
         'the audio rates are announced either way'
     )
+
+    // A voice chat rings nobody, so it names nobody: the roster is what hit the server's
+    // bound (`427` when long, `404` when short). Only the caller is listed locally.
+    assert.equal(
+        children.some((child) => child.tag === 'group_info'),
+        false,
+        'a voice chat ships NO group_info'
+    )
+    assert.equal(participants.length, 1, 'only the caller is on the local composition')
+})
+
+test('a voice chat starts in a group of any size (no roster, no device lookups)', async () => {
+    const pedidos: string[][] = []
+    const deps = createDeps(async (jids) => {
+        pedidos.push([...jids])
+        return jids.map((jid) => ({ jid, deviceJids: [`${jid.split('@')[0]}:1@lid`] }))
+    })
+    const many = Array.from({ length: 400 }, (_, i) => ({ jid: `200000000000${i}@lid` }))
+    const { node } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false, true)
+    const offer = offerNode(node)
+
+    assert.equal(offer.attrs.lightweight, '1')
+    assert.equal(
+        (offer.content as BinaryNode[]).some((child) => child.tag === 'group_info'),
+        false,
+        'nenhum roster, seja o grupo de 3 ou de 400'
+    )
+    assert.equal(pedidos.flat().length, 0, 'nem resolve device: nao ha quem tocar')
 })

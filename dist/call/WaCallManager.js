@@ -111,12 +111,16 @@ class WaCallManager extends node_events_1.EventEmitter {
         const callCreator = (0, call_jids_js_1.selfJidOf)(this.deps);
         const offer = await (0, group_call_js_1.buildGroupOfferStanza)(this.deps, callId, groupJid, participants, options.isVideo ?? false, options.isLightweight ?? false, this.signalingLogger);
         this.throwIfDestroyed();
+        const isLightweight = options.isLightweight ?? false;
         const creatorKey = (0, jid_js_1.groupParticipantAccountKey)(callCreator);
         const firstPeer = offer.participants.find((participant) => (0, jid_js_1.groupParticipantAccountKey)(participant.jid) !== creatorKey);
-        if (!firstPeer) {
+        if (!firstPeer && !isLightweight) {
             throw new Error(`a group call on ${groupJid} needs the participants to ring`);
         }
-        const info = call_state_js_1.CallInfo.newOutgoing(callId, firstPeer.jid, callCreator, mediaType);
+        // A voice chat rings nobody, so it has no peer to address: the call itself is the
+        // target, as a group accept uses. `peerJid` is only where the media session is anchored.
+        const peerJid = firstPeer?.jid ?? (0, call_stanza_js_1.toCallServerJid)(callId);
+        const info = call_state_js_1.CallInfo.newOutgoing(callId, peerJid, callCreator, mediaType);
         info.groupJid = groupJid;
         info.joinable = true;
         info.isLightweight = options.isLightweight ?? false;
@@ -125,7 +129,7 @@ class WaCallManager extends node_events_1.EventEmitter {
         this.applyPendingCallKey(session);
         this.reporter.markAnnounced(info);
         try {
-            await session.initMedia(callCreator, firstPeer.devices[0] ?? firstPeer.jid);
+            await session.initMedia(callCreator, firstPeer?.devices[0] ?? peerJid);
             this.throwIfDestroyed();
             await this.deps.lowLevelCoordinator.sendNode(offer.node);
             if (this.destroyed)
