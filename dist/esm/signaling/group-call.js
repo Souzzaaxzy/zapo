@@ -53,14 +53,18 @@ export async function buildGroupOfferStanza(deps, callId, groupJid, participants
         throw new Error('a group call offer has no jid of ours to name as its call-creator');
     }
     const creatorKey = groupParticipantAccountKey(callCreator);
-    // Cap BEFORE resolving devices: a group of hundreds would otherwise resolve every
-    // device (a fan-out lookup per account) only to drop most of them. The creator takes
-    // the first roster slot, so at most `WA_GROUP_OFFER_MAX_ACCOUNTS - 1` others fit.
-    const candidates = participants
-        .filter((participant) => groupParticipantAccountKey(participant.jid) !== creatorKey)
-        .slice(0, WA_GROUP_OFFER_MAX_ACCOUNTS - 1);
+    const others = participants.filter((participant) => groupParticipantAccountKey(participant.jid) !== creatorKey);
+    // A group that does not fit the call ceiling cannot be named whole. A voice chat rings
+    // nobody, so there is nobody to name: it ships NO roster and lets the server fill the
+    // membership from its answer. A call that rings caps its candidates BEFORE resolving
+    // devices, so a group of hundreds does not resolve every device only to drop most.
+    const overflows = others.length > WA_GROUP_OFFER_MAX_ACCOUNTS - 1;
+    const shipsRoster = !(isLightweight && overflows);
+    const candidates = shipsRoster
+        ? others.slice(0, WA_GROUP_OFFER_MAX_ACCOUNTS - 1)
+        : [];
     const resolved = await resolveOfferParticipantDevices(deps, candidates, log);
-    if (resolved.length === 0) {
+    if (resolved.length === 0 && shipsRoster) {
         throw new Error(`group call on ${groupJid} has no participant to ring`);
     }
     const creator = {
@@ -89,11 +93,12 @@ export async function buildGroupOfferStanza(deps, callId, groupJid, participants
     // is accepted and then creates nothing. What is capped is its SIZE
     // (`WA_GROUP_OFFER_MAX_ACCOUNTS`): a longer roster is refused with `error: '427'`,
     // which is what kept a group of 128 out (the creator takes a slot).
+    const offerContent = buildOfferMediaNodes(isVideo, isLightweight);
+    if (shipsRoster) {
+        offerContent.push({ tag: 'group_info', attrs: {}, content: users });
+    }
     return {
-        node: callStanza(toCallServerJid(callId), 'offer', callId, callCreator, isLightweight ? { 'group-jid': groupJid, lightweight: '1' } : { 'group-jid': groupJid }, [
-            ...buildOfferMediaNodes(isVideo, isLightweight),
-            { tag: 'group_info', attrs: {}, content: users }
-        ]),
+        node: callStanza(toCallServerJid(callId), 'offer', callId, callCreator, isLightweight ? { 'group-jid': groupJid, lightweight: '1' } : { 'group-jid': groupJid }, offerContent),
         participants: listed
     };
 }
