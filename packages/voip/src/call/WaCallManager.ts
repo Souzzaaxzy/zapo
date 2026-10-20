@@ -617,7 +617,18 @@ export class WaCallManager extends EventEmitter {
     /** An ack refusing our offer ends the call, which frees its slot. */
     async handleCallAck(node: BinaryNode): Promise<void> {
         const session = this.resolveSessionForOfferAck(node)
-        if (!session) return
+        if (!session) {
+            // At `warn`: an ack that arrives for a call we cannot match is otherwise invisible,
+            // and it looks exactly like an ack that never came. The two need telling apart.
+            this.logger.warn('offer ack arrived for no known call', {
+                callId: node.attrs?.['call-id'] ?? null,
+                from: node.attrs?.from ?? null,
+                type: node.attrs?.type ?? null,
+                error: node.attrs?.error ?? null,
+                liveCalls: this.calls.size
+            })
+            return
+        }
         await session.handleCallAck(node)
         if (session.info.isEnded) {
             await this.release(session.callId)
