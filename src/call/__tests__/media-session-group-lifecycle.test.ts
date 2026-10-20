@@ -72,6 +72,39 @@ test('on a group call we placed, an accept connects once and sends nothing back'
     assert.equal(harness.link.sections('keys').length, 0)
 })
 
+test('the ack of a group offer seeds the composition from the roster it carries', async () => {
+    // Um chat de voz cujo grupo nao cabe vai SEM roster no offer: o ack e' o UNICO lugar
+    // onde a composicao pode nascer. Sem isto a call fica com composicao VAZIA e nao sobe.
+    const info = CallInfo.newOutgoing(ID, PEER, SELF_DEVICE, CallMediaType.Audio)
+    info.groupJid = GROUP_JID
+    info.joinable = true
+    info.isLightweight = true
+    const harness = await createSession({ info })
+    harness.call.applyTransition({ type: 'offer_sent' })
+    assert.equal(harness.call.groupComposition?.participants.length ?? 0, 0, 'comeca vazia')
+
+    await harness.session.handleCallAck({
+        tag: 'ack',
+        attrs: { class: 'call', type: 'offer', 'call-id': ID },
+        content: [
+            {
+                tag: 'group_info',
+                attrs: { media: 'audio', 'connected-limit': '32' },
+                content: toRoster([...THREE_WAY]).map((entry) => ({
+                    tag: 'user',
+                    attrs: { jid: entry.jid, ...(entry.state ? { state: entry.state } : {}) },
+                    content: entry.devices.map((jid) => ({ tag: 'device', attrs: { jid } }))
+                }))
+            }
+        ]
+    })
+    assert.equal(
+        harness.call.groupComposition?.participants.length,
+        3,
+        'a composicao vem do roster do ack'
+    )
+})
+
 test('a stale-roster nack (427) on a voice chat is answered with the roster it echoed', async () => {
     // O servidor recusa um offer cujo device set ele considera velho com `427` e devolve o
     // roster que quer, esperando o caller re-ofertar contra ele. Sem isso o chat de voz morre
