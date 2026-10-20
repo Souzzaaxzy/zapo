@@ -317,6 +317,41 @@ test('a group offer needs a jid of ours to name as its call-creator', async () =
     )
 })
 
+test('a group offer never names more than the server roster bound (127 accounts)', async () => {
+    // MEDIDO: o servidor recusa o offer que nomeia mais contas que o limite do
+    // roster oficial (`GroupInfoStanza.MAX_PARTICIPANTS = 0x7f`) com
+    // `error: '427'` -- o caso de um grupo de 128 membros (o criador conta).
+    const many = Array.from({ length: 300 }, (_, i) => ({ jid: `200000000000${i}@lid` }))
+    const { node, participants } = await buildGroupOfferStanza(
+        createDeps(),
+        CALL_ID,
+        GROUP_JID,
+        many,
+        false
+    )
+    const offer = offerNode(node)
+    const groupInfo = (offer.content as BinaryNode[]).find((child) => child.tag === 'group_info')
+    const users = groupInfo?.content as BinaryNode[]
+
+    assert.equal(users.length, 0x7f, 'no maximo 127 contas no group_info')
+    assert.equal(participants.length, 0x7f, 'e a composicao inicial tambem')
+    assert.equal(users[0].attrs.jid, '50062877036657@lid', 'o criador segue primeiro')
+})
+
+test('a group offer below the bound is not trimmed', async () => {
+    const { node } = await buildGroupOfferStanza(
+        createDeps(),
+        CALL_ID,
+        GROUP_JID,
+        PARTICIPANTS,
+        false
+    )
+    const offer = offerNode(node)
+    const groupInfo = (offer.content as BinaryNode[]).find((child) => child.tag === 'group_info')
+    const users = groupInfo?.content as BinaryNode[]
+    assert.equal(users.length, 3, 'criador + 2 convidados, sem corte')
+})
+
 test('a plain group offer marks no voice chat', async () => {
     const { node } = await buildGroupOfferStanza(
         createDeps(),

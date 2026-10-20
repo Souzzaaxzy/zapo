@@ -8,6 +8,16 @@ interface GroupOfferStanza {
     readonly participants: readonly WaCallGroupParticipant[];
 }
 /**
+ * The most accounts a group `<offer>`'s `<group_info>` may name, ourselves included.
+ *
+ * Measured: the server refuses an offer that names more, with `error: '427'` on the
+ * `<ack>` (`handleCallAck` -> `SetupFailed`). The ceiling is the roster bound the
+ * official client enforces (`GroupInfoStanza.MAX_PARTICIPANTS = 0x7f`), not the
+ * 32-participant limit of a *connected* call: a group of 128 members overflows it by
+ * one, because the creator counts. Naming fewer is always accepted.
+ */
+export declare const WA_GROUP_OFFER_MAX_ACCOUNTS = 127;
+/**
  * Builds the `<offer>` that places a group call: addressed to `<call-id>@call`, with the
  * participants in an attribute-less `<group_info>` (creator first, with only the device placing the
  * call, the only one carrying a `<capability>`) and no `<destination>`, `<enc>`, `<encopt>` or `<device-identity>`: the key

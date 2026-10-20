@@ -7,6 +7,16 @@ import { deviceIdentityNode, encryptCallKeyForDevices } from './call-key.js';
 import { callStanza, toCallServerJid } from './call-stanza.js';
 import { normalizeParticipantDeviceJids } from './group-info.js';
 import { buildOfferMediaNodes, CAPABILITY_OFFER, CAPABILITY_VIDEO_OFFER } from './lifecycle.js';
+/**
+ * The most accounts a group `<offer>`'s `<group_info>` may name, ourselves included.
+ *
+ * Measured: the server refuses an offer that names more, with `error: '427'` on the
+ * `<ack>` (`handleCallAck` -> `SetupFailed`). The ceiling is the roster bound the
+ * official client enforces (`GroupInfoStanza.MAX_PARTICIPANTS = 0x7f`), not the
+ * 32-participant limit of a *connected* call: a group of 128 members overflows it by
+ * one, because the creator counts. Naming fewer is always accepted.
+ */
+export const WA_GROUP_OFFER_MAX_ACCOUNTS = 0x7f;
 function buildGroupUserNode(participant, capability) {
     return {
         tag: 'user',
@@ -56,6 +66,8 @@ export async function buildGroupOfferStanza(deps, callId, groupJid, participants
             jid: toUserJid(participant.jid),
             devices: normalizeParticipantDeviceJids(participant.jid, participant.devices)
         };
+        if (listed.length >= WA_GROUP_OFFER_MAX_ACCOUNTS)
+            break;
         listed.push(entry);
         users.push(buildGroupUserNode(entry));
     }
