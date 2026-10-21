@@ -1,12 +1,13 @@
 import { createNoopLogger } from 'zapo-js';
 import { normalizeDeviceJid, toUserJid } from 'zapo-js/protocol';
 import { buildReceiptNode } from 'zapo-js/transport';
-import { groupParticipantAccountKey } from '../jid.js';
+import { groupParticipantAccountKey, toDeviceJid } from '../jid.js';
 import { resolveOfferParticipantDevices } from '../peer-devices.js';
 import { deviceIdentityNode, encryptCallKeyForDevices } from './call-key.js';
 import { callStanza, toCallServerJid } from './call-stanza.js';
 import { normalizeParticipantDeviceJids } from './group-info.js';
 import { buildOfferMediaNodes, CAPABILITY_OFFER, CAPABILITY_VIDEO_OFFER } from './lifecycle.js';
+import { computePhashV2 } from './phash.js';
 /**
  * The most accounts a group `<offer>`'s `<group_info>` may name, ourselves included.
  *
@@ -19,6 +20,28 @@ import { buildOfferMediaNodes, CAPABILITY_OFFER, CAPABILITY_VIDEO_OFFER } from '
  * rest joins from the app.
  */
 export const WA_GROUP_OFFER_MAX_ACCOUNTS = 32;
+/**
+ * The participant-set hash (`2:<base64>`) of a group's resolved device set, or `null` when
+ * there is nothing to hash.
+ *
+ * <p>Every device of every participant goes into the hash -- that is the whole point: it
+ * stands in for the list we cannot write. The participants' own jids are added when a
+ * member resolved to no device, so a member is never silently dropped from the set.
+ */
+function phashOfGroup(resolved) {
+    const devices = new Set();
+    for (const participant of resolved) {
+        if (participant.devices.length === 0) {
+            devices.add(toDeviceJid(participant.jid));
+            continue;
+        }
+        for (const device of participant.devices)
+            devices.add(device);
+    }
+    if (devices.size === 0)
+        return null;
+    return computePhashV2([...devices]);
+}
 function buildGroupUserNode(participant, capability) {
     return {
         tag: 'user',
@@ -54,17 +77,18 @@ export async function buildGroupOfferStanza(deps, callId, groupJid, participants
     }
     const creatorKey = groupParticipantAccountKey(callCreator);
     const others = participants.filter((participant) => groupParticipantAccountKey(participant.jid) !== creatorKey);
-    // A group that does not fit the call ceiling cannot be named whole. A voice chat rings
-    // nobody, so there is nobody to name: it ships NO roster and lets the server fill the
-    // membership from its answer. A call that rings caps its candidates BEFORE resolving
-    // devices, so a group of hundreds does not resolve every device only to drop most.
+    // A group that does not fit the call ceiling cannot be NAMED: a roster shorter than the
+    // group is refused (`412`/`427`) and an offer naming nobody is dropped in silence (no
+    // ack at all). The official client references such a set by its HASH instead -- a
+    // `<group_info phash="2:...">` with no `<user>` children -- and the server resolves it
+    // against the group. A voice chat rings nobody, so it is the one that can take that
+    // path; a call that rings still caps its candidates BEFORE resolving devices, so a
+    // group of hundreds does not resolve every device only to drop most.
     const overflows = others.length > WA_GROUP_OFFER_MAX_ACCOUNTS - 1;
-    const shipsRoster = !(isLightweight && overflows);
-    const candidates = shipsRoster
-        ? others.slice(0, WA_GROUP_OFFER_MAX_ACCOUNTS - 1)
-        : [];
+    const hashOnly = isLightweight && overflows;
+    const candidates = hashOnly ? others : others.slice(0, WA_GROUP_OFFER_MAX_ACCOUNTS - 1);
     const resolved = await resolveOfferParticipantDevices(deps, candidates, log);
-    if (resolved.length === 0 && shipsRoster) {
+    if (resolved.length === 0 && !hashOnly) {
         throw new Error(`group call on ${groupJid} has no participant to ring`);
     }
     const creator = {
@@ -73,15 +97,17 @@ export async function buildGroupOfferStanza(deps, callId, groupJid, participants
     };
     const listed = [creator];
     const users = [buildGroupUserNode(creator, isVideo ? CAPABILITY_VIDEO_OFFER : CAPABILITY_OFFER)];
-    for (const participant of resolved) {
-        const entry = {
-            jid: toUserJid(participant.jid),
-            devices: normalizeParticipantDeviceJids(participant.jid, participant.devices)
-        };
-        if (listed.length >= WA_GROUP_OFFER_MAX_ACCOUNTS)
-            break;
-        listed.push(entry);
-        users.push(buildGroupUserNode(entry));
+    if (!hashOnly) {
+        for (const participant of resolved) {
+            const entry = {
+                jid: toUserJid(participant.jid),
+                devices: normalizeParticipantDeviceJids(participant.jid, participant.devices)
+            };
+            if (listed.length >= WA_GROUP_OFFER_MAX_ACCOUNTS)
+                break;
+            listed.push(entry);
+            users.push(buildGroupUserNode(entry));
+        }
     }
     // The offer carries exactly two things that make a voice chat, and nothing else: the
     // `lightweight='1'` marker and the `<silence>` node `buildOfferMediaNodes` adds. Adding
@@ -90,11 +116,19 @@ export async function buildGroupOfferStanza(deps, callId, groupJid, participants
     //
     // The roster is REQUIRED, voice chat or not: it is the caller's best known device set,
     // and it is what lets the server fan the offer to the participants at all. Omitting it
-    // is accepted and then creates nothing. What is capped is its SIZE
-    // (`WA_GROUP_OFFER_MAX_ACCOUNTS`): a longer roster is refused with `error: '427'`,
-    // which is what kept a group of 128 out (the creator takes a slot).
+    // is accepted and then creates nothing. What changes is its SHAPE: an enumerated
+    // `<group_info>` when the group fits (`WA_GROUP_OFFER_MAX_ACCOUNTS`; a longer roster is
+    // refused with `error: '427'`), or the participant-set HASH when it does not.
     const offerContent = buildOfferMediaNodes(isVideo, isLightweight);
-    if (shipsRoster) {
+    if (hashOnly) {
+        // No participant resolved to a device means there is no set to hash; the enumerated
+        // path would have thrown, so keep the offer well formed by omitting the roster.
+        const phash = phashOfGroup(resolved);
+        if (phash !== null) {
+            offerContent.push({ tag: 'group_info', attrs: { phash }, content: undefined });
+        }
+    }
+    else {
         offerContent.push({ tag: 'group_info', attrs: {}, content: users });
     }
     return {

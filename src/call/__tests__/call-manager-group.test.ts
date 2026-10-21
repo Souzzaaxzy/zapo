@@ -628,11 +628,14 @@ test('a call key ahead of a roster-only group offer keys the call once the offer
     assert.deepEqual(call?.encryptionKey, CALL_KEY)
 })
 
-test('a voice chat too big for the call ceiling is placed WITHOUT a roster', async () => {
+test('a voice chat too big for the call ceiling is placed with the roster as a HASH', async () => {
     // O bug que este teste trava: o offer ia sem roster (nao ha quem nomear), mas o manager
     // ainda exigia um `firstPeer` e lancava
     // "a group call on <jid> needs the participants to ring" -- o comando falhava com
     // "o motor de midia nao subiu" em vez de subir o chat de voz.
+    //
+    // E o caminho de FUNDO: nomear menos que o grupo e recusado (412/427) e nomear ninguem
+    // e descartado em silencio. O conjunto vai pelo HASH (`<group_info phash="2:...">`).
     const mock = createMock()
     const manager = createManager(mock)
     const many = Array.from({ length: 40 }, (_, i) => ({ jid: `5000000000${i}@lid` }))
@@ -648,11 +651,10 @@ test('a voice chat too big for the call ceiling is placed WITHOUT a roster', asy
     assert.ok(offer, 'o offer saiu')
     const inner = innerOf(offer)
     assert.equal(inner.attrs.lightweight, '1', 'marcado como voice chat')
-    assert.equal(
-        (inner.content as BinaryNode[]).some((child) => child.tag === 'group_info'),
-        false,
-        'sem roster: nao ha quem nomear'
-    )
+    const groupInfo = (inner.content as BinaryNode[]).find((child) => child.tag === 'group_info')
+    assert.ok(groupInfo, 'o roster vai -- como HASH, nao como lista')
+    assert.match(String(groupInfo?.attrs.phash), /^2:[A-Za-z0-9+/]{8}$/, 'phash v2')
+    assert.equal(groupInfo?.content, undefined, 'sem filhos: o hash substitui a lista')
     const call = manager.getCall(callId)
     assert.equal(call?.isLightweight, true)
     assert.equal(call?.groupJid, GROUP_JID)

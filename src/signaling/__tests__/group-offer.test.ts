@@ -428,10 +428,12 @@ test('a voice chat flags itself, announces silence, and ships the roster', async
     assert.equal(participants.length, 3, 'a composicao local tem os tres')
 })
 
-test('a voice chat too big for the call ceiling ships NO roster', async () => {
-    // Um grupo que nao cabe no teto da call (32) nao pode ser nomeado inteiro. Um chat de
-    // voz NAO toca ninguem, entao nao ha quem nomear: ele vai SEM roster e o servidor
-    // preenche a composicao na resposta. (A chamada que TOCA corta em 32.)
+test('a voice chat too big for the call ceiling ships the roster as a HASH', async () => {
+    // Um grupo que nao cabe no teto (32) nao pode ser NOMEADO: um roster menor que o grupo e
+    // recusado (412/427) e um offer sem lista e descartado em silencio (nenhum ack). O
+    // cliente oficial referencia esse conjunto pelo HASH (`<group_info phash="2:...">`, sem
+    // filhos) e o servidor resolve contra o grupo. Medido no grupo real: nomear 0 -> nada;
+    // 32 -> 412; 127 -> 427.
     const pedidos: string[][] = []
     const deps = createDeps(async (jids) => {
         pedidos.push([...jids])
@@ -441,12 +443,11 @@ test('a voice chat too big for the call ceiling ships NO roster', async () => {
     const { node } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false, true)
     const offer = offerNode(node)
     assert.equal(offer.attrs.lightweight, '1', 'o marcador vai')
-    assert.equal(
-        (offer.content as BinaryNode[]).some((child) => child.tag === 'group_info'),
-        false,
-        'sem roster: nao ha quem nomear num chat de voz'
-    )
-    assert.equal(pedidos.flat().length, 0, 'nem resolve device')
+    const groupInfo = (offer.content as BinaryNode[]).find((child) => child.tag === 'group_info')
+    assert.ok(groupInfo, 'o roster vai -- como HASH, nao como lista')
+    assert.match(String(groupInfo?.attrs.phash), /^2:[A-Za-z0-9+/]{8}$/, 'phash v2')
+    assert.equal(groupInfo?.content, undefined, 'sem filhos: o hash substitui a lista')
+    assert.ok(pedidos.flat().length >= 399, 'o hash cobre o conjunto INTEIRO de devices')
 })
 test('a voice chat that FITS the ceiling still ships its roster', async () => {
     const pedidos: string[][] = []
