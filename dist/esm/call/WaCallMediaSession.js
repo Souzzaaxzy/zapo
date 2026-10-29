@@ -591,14 +591,28 @@ export class WaCallMediaSession {
                 if (await this.reofferWithAckRoster())
                     return;
             }
-            this.logger.warn('offer refused by the server, call ended', {
-                callId: this.info.callId,
-                error
-            });
-            if (!this.info.isEnded) {
-                await this.terminate(EndCallReason.SetupFailed, SETUP_FAILED_REASON);
+            // NOT every error on the ack is a refusal. Measured: the server can answer the
+            // offer with an error AND still allocate the call -- the ack carries the roster
+            // and a `<relay>` (the media allocation). A relay is only handed out for a call
+            // that exists, so terminating here threw away a call the server had already
+            // created, which is exactly "it goes up and drops right away".
+            if (findNodeChild(node, 'relay') !== undefined) {
+                this.logger.warn('offer ack carried an error but the server allocated the call; continuing', {
+                    callId: this.info.callId,
+                    error,
+                    hasRoster: findNodeChild(node, 'group_info') !== undefined
+                });
             }
-            return;
+            else {
+                this.logger.warn('offer refused by the server, call ended', {
+                    callId: this.info.callId,
+                    error
+                });
+                if (!this.info.isEnded) {
+                    await this.terminate(EndCallReason.SetupFailed, SETUP_FAILED_REASON);
+                }
+                return;
+            }
         }
         // A repeated ack carries the same settings, costly to decode again.
         if (!this.info.voipSettings) {
