@@ -74,6 +74,26 @@ export interface GroupInfo {
  * device count disagrees with its nack.
  */
 export declare function parseGroupInfoNode(node: BinaryNode): GroupInfo;
+/** How an offer referenced its roster on the wire, and by how many accounts. */
+export interface OfferRosterShape {
+    readonly shipped: boolean;
+    /** Accounts named in the list; `0` when the roster is a hash (it names nobody). */
+    readonly accounts: number;
+    readonly form: 'none' | 'hash' | 'list';
+    readonly phash: string | null;
+}
+/**
+ * Reads the `<group_info>` an OFFER shipped, given either the `<call>` envelope or the `<offer>`
+ * itself.
+ *
+ * <p>The `<group_info>` hangs off the `<offer>`, never off the `<call>` envelope. Looking for it on
+ * the envelope finds nothing and answers "no roster" for EVERY offer -- which is exactly what made
+ * the `group offer sent` log report `rosterShipped: false` / `rosterAccounts: 0` even when the
+ * roster was there. A log that always says the same thing hides the very thing it exists to show.
+ *
+ * @param node the `<call>` envelope or the `<offer>` node
+ */
+export declare function describeOfferRoster(node: BinaryNode): OfferRosterShape;
 /** The participants of a parsed `<group_info>` in the shape the reconciler reads. */
 export declare function toGroupCallParticipants(info: GroupInfo): readonly WaCallGroupParticipant[];
 /** What the `<group_info>` of a call stanza says about who is on the call. */

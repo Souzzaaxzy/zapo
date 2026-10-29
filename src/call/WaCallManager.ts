@@ -24,6 +24,7 @@ import {
     toCallServerJid
 } from '../signaling/call-stanza.js'
 import { buildEncRekeyReceiptStanza, buildGroupOfferStanza } from '../signaling/group-call.js'
+import { describeOfferRoster } from '../signaling/group-info.js'
 import {
     buildOfferStanza,
     parseGroupJidAttr,
@@ -268,16 +269,23 @@ export class WaCallManager extends EventEmitter {
             this.reporter.emitState(info)
         }
 
-        // At `warn` so it is always visible: the roster size the offer actually named is the
-        // number that decides whether the server accepts it, and the caller's own count (the
-        // group size) is a different one. Seeing both is what tells the two apart.
-        const rosterNode = findNodeChild(offer.node, 'group_info')
+        // At `warn` so it is always visible: the shape the offer actually shipped is what
+        // decides whether the server accepts it, and the caller's own count (the group size)
+        // is a different one. Seeing both is what tells the two apart.
+        //
+        // The `<group_info>` lives inside the `<offer>`, never under the `<call>` envelope:
+        // reading it off the envelope reported `rosterShipped: false` / `rosterAccounts: 0` for
+        // EVERY offer, hash and list alike. `describeOfferRoster` descends to the offer and
+        // reports the form too, so the two cases stop looking identical in the log.
+        const roster = describeOfferRoster(offer.node)
         this.logger.warn('group offer sent', {
             callId,
             groupJid,
             voiceChat: options.isLightweight === true,
-            rosterShipped: rosterNode !== undefined,
-            rosterAccounts: Array.isArray(rosterNode?.content) ? rosterNode.content.length : 0
+            rosterShipped: roster.shipped,
+            rosterAccounts: roster.accounts,
+            rosterForm: roster.form,
+            phash: roster.phash
         })
 
         return callId

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import type { BinaryNode } from 'zapo-js/transport'
+import { type BinaryNode, findNodeChild } from 'zapo-js/transport'
 
 import {
+    describeOfferRoster,
     normalizeParticipantDeviceJids,
     parseGroupInfoNode,
     toGroupCallParticipants,
@@ -444,4 +445,51 @@ test('normalizeParticipantDeviceJids refuses a device of another account of the 
     assert.deepEqual(normalizeParticipantDeviceJids(USER, ['50062877036657:4@hosted.lid']), [
         '50062877036657:4@hosted.lid'
     ])
+})
+
+test('describeOfferRoster descends into the offer instead of reading the envelope', () => {
+    // O bug que este teste trava: o log `group offer sent` lia o `<group_info>` do
+    // ENVELOPE `<call>` (o no' e' `<call>` -> `<offer>` -> `<group_info>`) e por isso
+    // reportava `rosterShipped: false` / `rosterAccounts: 0` em TODO offer -- hash e
+    // lista. O log escondia exatamente o que existia para mostrar.
+    const roster = node('group_info', { phash: '2:AbCdEfGh' }, [])
+    const offer = node('offer', { 'call-id': 'C1' }, [roster])
+    const envelope = node('call', { id: 'X' }, [offer])
+
+    // O envelope NAO tem o grupo como filho direto -- ler so' ele e' o bug.
+    assert.equal(findNodeChild(envelope, 'group_info'), undefined)
+    // O helper desce ate' o offer e acha.
+    assert.deepEqual(describeOfferRoster(envelope), {
+        shipped: true,
+        accounts: 0,
+        form: 'hash',
+        phash: '2:AbCdEfGh'
+    })
+    // E aceita o proprio `<offer>` (nao so' o envelope).
+    assert.equal(describeOfferRoster(offer).form, 'hash')
+})
+
+test('describeOfferRoster tells a hash roster from an enumerated one', () => {
+    const users = [
+        node('user', { jid: '111@lid' }, [node('device', { jid: '111:0@lid' }, [])]),
+        node('user', { jid: '222@lid' }, [node('device', { jid: '222:0@lid' }, [])])
+    ]
+    const comLista = node('call', { id: 'X' }, [
+        node('offer', { 'call-id': 'C1' }, [node('group_info', {}, users)])
+    ])
+    assert.deepEqual(describeOfferRoster(comLista), {
+        shipped: true,
+        accounts: 2,
+        form: 'list',
+        phash: null
+    })
+
+    // Sem roster nenhum: `none` (nao `list` com zero contas).
+    const semRoster = node('call', { id: 'X' }, [node('offer', { 'call-id': 'C1' }, [])])
+    assert.deepEqual(describeOfferRoster(semRoster), {
+        shipped: false,
+        accounts: 0,
+        form: 'none',
+        phash: null
+    })
 })

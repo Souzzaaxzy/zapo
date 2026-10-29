@@ -13,6 +13,7 @@ const relay_ack_js_1 = require("../relay/relay-ack.js");
 const call_key_js_1 = require("../signaling/call-key.js");
 const call_stanza_js_1 = require("../signaling/call-stanza.js");
 const group_call_js_1 = require("../signaling/group-call.js");
+const group_info_js_1 = require("../signaling/group-info.js");
 const lifecycle_js_1 = require("../signaling/lifecycle.js");
 const voip_settings_js_1 = require("../signaling/voip-settings.js");
 const types_js_1 = require("../types.js");
@@ -147,16 +148,23 @@ class WaCallManager extends node_events_1.EventEmitter {
             info.applyTransition({ type: 'offer_sent' });
             this.reporter.emitState(info);
         }
-        // At `warn` so it is always visible: the roster size the offer actually named is the
-        // number that decides whether the server accepts it, and the caller's own count (the
-        // group size) is a different one. Seeing both is what tells the two apart.
-        const rosterNode = (0, transport_1.findNodeChild)(offer.node, 'group_info');
+        // At `warn` so it is always visible: the shape the offer actually shipped is what
+        // decides whether the server accepts it, and the caller's own count (the group size)
+        // is a different one. Seeing both is what tells the two apart.
+        //
+        // The `<group_info>` lives inside the `<offer>`, never under the `<call>` envelope:
+        // reading it off the envelope reported `rosterShipped: false` / `rosterAccounts: 0` for
+        // EVERY offer, hash and list alike. `describeOfferRoster` descends to the offer and
+        // reports the form too, so the two cases stop looking identical in the log.
+        const roster = (0, group_info_js_1.describeOfferRoster)(offer.node);
         this.logger.warn('group offer sent', {
             callId,
             groupJid,
             voiceChat: options.isLightweight === true,
-            rosterShipped: rosterNode !== undefined,
-            rosterAccounts: Array.isArray(rosterNode?.content) ? rosterNode.content.length : 0
+            rosterShipped: roster.shipped,
+            rosterAccounts: roster.accounts,
+            rosterForm: roster.form,
+            phash: roster.phash
         });
         return callId;
     }
