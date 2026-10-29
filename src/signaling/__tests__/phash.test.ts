@@ -36,3 +36,27 @@ test('computePhashV2 has no participant ceiling', () => {
     // Um membro a mais muda o hash: ele cobre o conjunto inteiro.
     assert.notEqual(hash, computePhashV2([...many, '2999999999999:1@lid']))
 })
+
+test('computePhashV2 matches the reference implementation vectors', () => {
+    // Vetores medidos contra a implementacao de referencia (`whatsapp-rust`,
+    // `build_group_phash_set` + `participant_list_hash`): o conjunto e' o dos convidados
+    // resolvidos (`A`) MAIS o device que envia (`B`) -- `phashV2([].concat(A, [B]))`. Os
+    // dois valores abaixo sao os do teste dela; se o nosso hash divergir, o servidor nao
+    // reconhece o conjunto e o offer e' recusado sem pista de que o defeito era o hash.
+    const recipientes = [
+        '100000000000001@lid',
+        '100000000000001:5@lid',
+        '100000000000002@lid',
+        '100000000000003@lid',
+        '100000000000003:12@lid',
+        '100000000000099@lid'
+    ]
+    const proprioDevice = '100000000000099:24@lid'
+
+    assert.equal(computePhashV2(recipientes), '2:rZoSAdIV', 'sem o proprio device')
+    assert.equal(
+        computePhashV2([...recipientes, proprioDevice]),
+        '2:sti8OtHX',
+        'com o proprio device (a forma que o servidor valida)'
+    )
+})

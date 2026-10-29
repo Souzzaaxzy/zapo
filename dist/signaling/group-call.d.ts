@@ -6,6 +6,12 @@ import type { CallOfferParticipant, WaVoipDeps } from '../types.js';
 interface GroupOfferStanza {
     readonly node: BinaryNode;
     readonly participants: readonly WaCallGroupParticipant[];
+    /**
+     * Whether the roster shipped as the participant-set HASH instead of a list, which is what
+     * an offer does for a group too large to name. There is no peer to address in that case,
+     * so the caller targets the call itself.
+     */
+    readonly hashOnly: boolean;
 }
 /**
  * The most accounts a group `<offer>`'s `<group_info>` may name, ourselves included.

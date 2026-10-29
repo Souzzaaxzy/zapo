@@ -660,6 +660,31 @@ test('a voice chat too big for the call ceiling is placed with the roster as a H
     assert.equal(call?.groupJid, GROUP_JID)
 })
 
+test('a RINGING call in a group too large to name is placed with the roster as a HASH', async () => {
+    // O caso do dono: um grupo de +100 membros e uma CHAMADA (nao chat de voz). Nomear
+    // 32 de 400 e' o que o servidor recusa (412/427); o conjunto inteiro vai pelo HASH,
+    // e o offer deixa de estar limitado ao teto. Antes desta correcao o caminho do hash
+    // estava preso ao `isLightweight`, entao uma chamada num grupo grande nunca saia
+    // dele -- ficava nomeando 32 e era recusada.
+    const mock = createMock()
+    const manager = createManager(mock)
+    const many = Array.from({ length: 120 }, (_, i) => ({ jid: `5000000000${i}@lid` }))
+
+    const callId = await manager.startCall({ groupJid: GROUP_JID, participants: many })
+
+    assert.ok(callId, 'a chamada subiu num grupo que nao cabe')
+    const offer = mock.sent.find((node) => innerOf(node).tag === 'offer')
+    assert.ok(offer, 'o offer saiu')
+    const inner = innerOf(offer)
+    assert.equal(inner.attrs.lightweight, undefined, 'e uma chamada que TOCA, sem marcador')
+    const groupInfo = (inner.content as BinaryNode[]).find((child) => child.tag === 'group_info')
+    assert.ok(groupInfo, 'o roster vai -- como HASH, nao como lista')
+    assert.match(String(groupInfo?.attrs.phash), /^2:[A-Za-z0-9+/]{8}$/, 'phash v2')
+    assert.equal(groupInfo?.content, undefined, 'sem filhos: o hash substitui a lista')
+    const call = manager.getCall(callId)
+    assert.equal(call?.groupJid, GROUP_JID)
+})
+
 test('a call that RINGS with nobody to ring is still refused', async () => {
     const mock = createMock()
     const manager = createManager(mock)

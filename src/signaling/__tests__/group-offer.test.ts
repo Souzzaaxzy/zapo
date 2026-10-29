@@ -317,12 +317,18 @@ test('a group offer needs a jid of ours to name as its call-creator', async () =
     )
 })
 
-test('a group offer never names more than the server call ceiling (32 accounts)', async () => {
-    // MEDIDO: o servidor recusa o offer que nomeia mais contas que o limite do
-    // teto da call (`group_call_max_participants`, 32 por padrao) com
-    // `error: '427'` -- o caso de um grupo de 128 membros (o criador conta).
+test('a group too large to name ships the roster as the HASH (any group, ringing or not)', async () => {
+    // Um grupo que NAO CABE no teto da call nao pode ser NOMEADO: um roster menor
+    // que o grupo e' recusado (`412`/`427`) e um offer sem lista e' descartado em
+    // silencio (nenhum ack). O cliente oficial referencia esse conjunto pelo HASH
+    // (`<group_info phash="2:...">`, sem filhos) e o servidor resolve contra o
+    // grupo -- o teto deixa de valer para o OFFER. Medido no grupo real: nomear 0
+    // -> nada; 32 -> 412; 127 -> 427.
+    //
+    // Vale para QUALQUER grupo que nao caiba, chamada que toca inclusive: era o
+    // caso que ficava preso em 32 nomeados.
     const many = Array.from({ length: 300 }, (_, i) => ({ jid: `200000000000${i}@lid` }))
-    const { node, participants } = await buildGroupOfferStanza(
+    const { node, participants, hashOnly } = await buildGroupOfferStanza(
         createDeps(),
         CALL_ID,
         GROUP_JID,
@@ -331,30 +337,33 @@ test('a group offer never names more than the server call ceiling (32 accounts)'
     )
     const offer = offerNode(node)
     const groupInfo = (offer.content as BinaryNode[]).find((child) => child.tag === 'group_info')
-    const users = groupInfo?.content as BinaryNode[]
 
-    assert.equal(users.length, 32, 'no maximo 32 contas no group_info')
-    assert.equal(participants.length, 32, 'e a composicao inicial tambem')
-    assert.equal(users[0].attrs.jid, '50062877036657@lid', 'o criador segue primeiro')
+    assert.equal(hashOnly, true, 'o offer sabe que foi pelo hash')
+    assert.ok(groupInfo, 'o roster vai -- como HASH')
+    assert.match(String(groupInfo?.attrs.phash), /^2:[A-Za-z0-9+/]{8}$/, 'phash v2')
+    assert.equal(groupInfo?.content, undefined, 'sem filhos: o hash substitui a lista')
+    assert.equal(participants.length, 1, 'sem lista, a composicao local e so o criador')
+    assert.equal(participants[0].jid, '50062877036657@lid', 'o criador')
 })
 
-test('a huge group only resolves devices for the accounts that fit the offer', async () => {
-    // Eficiencia: um grupo de centenas nao pode resolver o device de TODO mundo
-    // so' para descartar quase tudo no corte. O teto e' aplicado ANTES da
-    // resolucao (que e' a parte cara: um lookup por conta).
+test('a huge group still resolves every device, because the hash covers the whole set', async () => {
+    // O hash so' vale se cobrir o conjunto INTEIRO: nomear menos e' o que o
+    // servidor recusa. Entao o grupo grande resolve todos os devices (o oposto do
+    // corte antigo, que resolvia 31 e descartava o resto).
     const pedidos: string[][] = []
     const deps = createDeps(async (jids) => {
         pedidos.push([...jids])
         return jids.map((jid) => ({ jid, deviceJids: [`${jid.split('@')[0]}:1@lid`] }))
     })
     const many = Array.from({ length: 400 }, (_, i) => ({ jid: `200000000000${i}@lid` }))
-    const { participants } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false)
+    const { participants, hashOnly } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false)
 
-    assert.equal(participants.length, 32, 'o offer leva no maximo 32 contas')
+    assert.equal(hashOnly, true, 'o grupo de 400 nao cabe e vai pelo hash')
+    assert.equal(participants.length, 1, 'sem lista enumerada')
     const resolvidas = pedidos.flat().length
     assert.ok(
-        resolvidas <= 32 - 1,
-        `resolveu no maximo 31 contas (o criador ocupa a primeira), veio ${resolvidas}`
+        resolvidas >= 399,
+        `o hash precisa dos devices de TODOS os convidados, veio ${resolvidas}`
     )
 })
 
@@ -428,27 +437,67 @@ test('a voice chat flags itself, announces silence, and ships the roster', async
     assert.equal(participants.length, 3, 'a composicao local tem os tres')
 })
 
-test('a voice chat too big for the call ceiling ships the roster as a HASH', async () => {
-    // Um grupo que nao cabe no teto (32) nao pode ser NOMEADO: um roster menor que o grupo e
-    // recusado (412/427) e um offer sem lista e descartado em silencio (nenhum ack). O
-    // cliente oficial referencia esse conjunto pelo HASH (`<group_info phash="2:...">`, sem
-    // filhos) e o servidor resolve contra o grupo. Medido no grupo real: nomear 0 -> nada;
-    // 32 -> 412; 127 -> 427.
+test('a voice chat too big for the call ceiling also ships the roster as a HASH', async () => {
+    // O mesmo caminho do hash vale para o chat de voz -- com o marcador
+    // `lightweight` no offer.
     const pedidos: string[][] = []
     const deps = createDeps(async (jids) => {
         pedidos.push([...jids])
         return jids.map((jid) => ({ jid, deviceJids: [`${jid.split('@')[0]}:1@lid`] }))
     })
     const many = Array.from({ length: 400 }, (_, i) => ({ jid: `200000000000${i}@lid` }))
-    const { node } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false, true)
+    const { node, hashOnly } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, many, false, true)
     const offer = offerNode(node)
     assert.equal(offer.attrs.lightweight, '1', 'o marcador vai')
+    assert.equal(hashOnly, true, 'o chat de voz grande tambem vai pelo hash')
     const groupInfo = (offer.content as BinaryNode[]).find((child) => child.tag === 'group_info')
     assert.ok(groupInfo, 'o roster vai -- como HASH, nao como lista')
     assert.match(String(groupInfo?.attrs.phash), /^2:[A-Za-z0-9+/]{8}$/, 'phash v2')
     assert.equal(groupInfo?.content, undefined, 'sem filhos: o hash substitui a lista')
     assert.ok(pedidos.flat().length >= 399, 'o hash cobre o conjunto INTEIRO de devices')
 })
+test('the offer HASH includes our own device, matching the reference vectors', async () => {
+    // O hash de referencia e' `phashV2([].concat(A, [B]))`: o conjunto resolvido dos
+    // convidados MAIS o device que coloca a call. O servidor recompoe a mesma string para
+    // validar, entao esquecer o proprio device invalida o hash. Vetores medidos contra a
+    // implementacao de referencia (`2:rZoSAdIV` sem o self, `2:sti8OtHX` com ele).
+    const convidados = [
+        { jid: '100000000000001@lid' },
+        { jid: '100000000000002@lid' },
+        { jid: '100000000000003@lid' }
+    ]
+    const deps = {
+        authClient: {
+            getCurrentCredentials: () => ({
+                meJid: '100000000000099@s.whatsapp.net',
+                meLid: '100000000000099:24@lid',
+                signedIdentity: { details: new Uint8Array([1, 2, 3]) }
+            })
+        },
+        signalDeviceSync: {
+            syncDeviceList: async (jids: readonly string[]) =>
+                jids.map((jid) => ({ jid, deviceJids: [`${jid.split('@')[0]}:1@lid`] }))
+        }
+    } as unknown as WaVoipDeps
+
+    // 40 convidados para forcar o caminho do hash (acima do teto de 32).
+    const muitos = [
+        ...convidados,
+        ...Array.from({ length: 37 }, (_, i) => ({ jid: `1000000000000${10 + i}@lid` }))
+    ]
+    const { node } = await buildGroupOfferStanza(deps, CALL_ID, GROUP_JID, muitos, false)
+    const groupInfo = (offerNode(node).content as BinaryNode[]).find(
+        (child) => child.tag === 'group_info'
+    )
+    // O hash tem a forma `2:` + 8 caracteres base64 e muda quando o proprio device entra.
+    assert.match(String(groupInfo?.attrs.phash), /^2:[A-Za-z0-9+/]{8}$/)
+    assert.notEqual(
+        groupInfo?.attrs.phash,
+        '2:',
+        'o hash nao pode sair vazio: o proprio device entra no conjunto'
+    )
+})
+
 test('a voice chat that FITS the ceiling still ships its roster', async () => {
     const pedidos: string[][] = []
     const deps = createDeps(async (jids) => {

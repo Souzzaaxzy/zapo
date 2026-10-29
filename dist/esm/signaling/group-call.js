@@ -27,8 +27,13 @@ export const WA_GROUP_OFFER_MAX_ACCOUNTS = 32;
  * <p>Every device of every participant goes into the hash -- that is the whole point: it
  * stands in for the list we cannot write. The participants' own jids are added when a
  * member resolved to no device, so a member is never silently dropped from the set.
+ *
+ * <p>Our own device is added too. The reference hashes `phashV2([].concat(A, [B]))`, where
+ * `A` is the resolved recipient set and `B` the sending device: the device that places the
+ * call is part of the set, and the server recomputes the same string to validate it.
+ * Confirmed against the reference vectors (`2:rZoSAdIV` without it, `2:sti8OtHX` with it).
  */
-function phashOfGroup(resolved) {
+function phashOfGroup(resolved, ownDeviceJid) {
     const devices = new Set();
     for (const participant of resolved) {
         if (participant.devices.length === 0) {
@@ -38,6 +43,7 @@ function phashOfGroup(resolved) {
         for (const device of participant.devices)
             devices.add(device);
     }
+    devices.add(ownDeviceJid);
     if (devices.size === 0)
         return null;
     return computePhashV2([...devices]);
@@ -81,14 +87,18 @@ export async function buildGroupOfferStanza(deps, callId, groupJid, participants
     // group is refused (`412`/`427`) and an offer naming nobody is dropped in silence (no
     // ack at all). The official client references such a set by its HASH instead -- a
     // `<group_info phash="2:...">` with no `<user>` children -- and the server resolves it
-    // against the group. A voice chat rings nobody, so it is the one that can take that
-    // path; a call that rings still caps its candidates BEFORE resolving devices, so a
-    // group of hundreds does not resolve every device only to drop most.
+    // against the group, so the ceiling stops applying to the OFFER: the call is placed
+    // against the whole group and whoever wants to join does so from the app.
+    //
+    // The hash path is taken by ANY overflowing group, ringing call or voice chat: the
+    // hash is how a set too large to write is referenced, and a ringing call needs it just
+    // as much as a voice chat does (naming 32 of a 400-member group is what gets refused).
+    // Capping BEFORE resolving devices keeps a group of hundreds from resolving every
+    // device only to drop most: the hash only needs the devices, not the account split.
     const overflows = others.length > WA_GROUP_OFFER_MAX_ACCOUNTS - 1;
-    const hashOnly = isLightweight && overflows;
-    const candidates = hashOnly ? others : others.slice(0, WA_GROUP_OFFER_MAX_ACCOUNTS - 1);
+    const candidates = overflows ? others : others.slice(0, WA_GROUP_OFFER_MAX_ACCOUNTS - 1);
     const resolved = await resolveOfferParticipantDevices(deps, candidates, log);
-    if (resolved.length === 0 && !hashOnly) {
+    if (resolved.length === 0 && !overflows) {
         throw new Error(`group call on ${groupJid} has no participant to ring`);
     }
     const creator = {
@@ -97,7 +107,7 @@ export async function buildGroupOfferStanza(deps, callId, groupJid, participants
     };
     const listed = [creator];
     const users = [buildGroupUserNode(creator, isVideo ? CAPABILITY_VIDEO_OFFER : CAPABILITY_OFFER)];
-    if (!hashOnly) {
+    if (!overflows) {
         for (const participant of resolved) {
             const entry = {
                 jid: toUserJid(participant.jid),
@@ -120,10 +130,10 @@ export async function buildGroupOfferStanza(deps, callId, groupJid, participants
     // `<group_info>` when the group fits (`WA_GROUP_OFFER_MAX_ACCOUNTS`; a longer roster is
     // refused with `error: '427'`), or the participant-set HASH when it does not.
     const offerContent = buildOfferMediaNodes(isVideo, isLightweight);
-    if (hashOnly) {
+    if (overflows) {
         // No participant resolved to a device means there is no set to hash; the enumerated
         // path would have thrown, so keep the offer well formed by omitting the roster.
-        const phash = phashOfGroup(resolved);
+        const phash = phashOfGroup(resolved, toDeviceJid(callCreator));
         if (phash !== null) {
             offerContent.push({ tag: 'group_info', attrs: { phash }, content: undefined });
         }
@@ -133,7 +143,8 @@ export async function buildGroupOfferStanza(deps, callId, groupJid, participants
     }
     return {
         node: callStanza(toCallServerJid(callId), 'offer', callId, callCreator, isLightweight ? { 'group-jid': groupJid, lightweight: '1' } : { 'group-jid': groupJid }, offerContent),
-        participants: listed
+        participants: listed,
+        hashOnly: overflows
     };
 }
 /**

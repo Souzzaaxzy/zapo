@@ -231,10 +231,12 @@ export class WaCallManager extends EventEmitter {
         const firstPeer = offer.participants.find(
             (participant) => groupParticipantAccountKey(participant.jid) !== creatorKey
         )
-        // A voice chat whose group does not fit ships NO roster, so there is no peer to address:
-        // the call itself is the target, as a group accept uses. Only a call that rings, or a
-        // voice chat that fits and named someone, needs a peer.
-        if (!firstPeer && !isLightweight) {
+        // A group too large to name ships the roster as the participant-set HASH, so there is
+        // no peer to address: the call itself is the target, as a group accept uses. A group
+        // that fits names someone and addresses that peer. `hashOnly` is the offer's own
+        // answer -- not `isLightweight` -- because the hash path is taken by ANY overflowing
+        // group, a ringing call included.
+        if (!firstPeer && !offer.hashOnly) {
             throw new Error(`a group call on ${groupJid} needs the participants to ring`)
         }
 
