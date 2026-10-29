@@ -27,10 +27,20 @@ const WaOutOfOrderStanzas_js_1 = require("./WaOutOfOrderStanzas.js");
 const DEFAULT_MAX_CONCURRENT_CALLS = 1;
 /** The `<terminate>` reason of the server taking a member whose media stopped off a group call. */
 const WA_USER_INVISIBLE_REASON = 'user_invisible';
+/**
+ * How long a hash-based group offer waits for the ack before it is reported as unanswered.
+ *
+ * <p>Wider than the offer's own setup time so a slow but real ack is not called missing; the
+ * point is only to say "the server never answered this offer" instead of leaving the caller to
+ * guess between a call still setting up and one the server dropped.
+ */
+const HASH_OFFER_ACK_WATCH_MS = 15000;
 class WaCallManager extends node_events_1.EventEmitter {
     constructor(config) {
         super();
         this.calls = new Map();
+        /** When the offer ack for a call arrived; absent means it never did. */
+        this.lastAckAt = new Map();
         /** Set by `destroy`: an offer still resolving when it ran must not make a call. */
         this.destroyed = false;
         this.outOfOrder = new WaOutOfOrderStanzas_js_1.WaOutOfOrderStanzas();
@@ -166,7 +176,39 @@ class WaCallManager extends node_events_1.EventEmitter {
             rosterForm: roster.form,
             phash: roster.phash
         });
+        // Um offer que foi pelo HASH depende do servidor RESOLVER o conjunto contra o grupo.
+        // Se nenhum ack chegar, o sintoma e' "subiu e nada apareceu" -- indistinguivel de um
+        // offer recusado em silencio. Esta linha, depois do prazo, separa os dois casos e diz
+        // qual caminho rodou (o `group offer sent` sozinho nao diz se a chamada parou ali).
+        if (roster.form === 'hash') {
+            this.armHashOfferWatchdog(callId, groupJid, roster);
+        }
         return callId;
+    }
+    /**
+     * Watches a hash-based group offer for the ack that never comes.
+     *
+     * <p>A roster too large to name is referenced by its hash and resolved by the server against
+     * the group; when the server drops such an offer it answers nothing at all, and "the call went
+     * up and nothing appeared" looks exactly like a call still being set up. The timer is unref'd so
+     * it never holds the process open, and it only logs -- it does not end the call.
+     */
+    armHashOfferWatchdog(callId, groupJid, roster) {
+        const timer = setTimeout(() => {
+            const session = this.calls.get(callId);
+            if (!session || session.info.isEnded)
+                return;
+            if (this.lastAckAt.get(callId) !== undefined)
+                return;
+            this.logger.warn('group offer sent as a HASH got no ack', {
+                callId,
+                groupJid,
+                phash: roster.phash,
+                waitedMs: HASH_OFFER_ACK_WATCH_MS,
+                hint: 'the server resolves the hash against the group; no ack means it did not answer this offer'
+            });
+        }, HASH_OFFER_ACK_WATCH_MS);
+        timer.unref?.();
     }
     async acceptCall(callId) {
         const session = this.getSessionOrThrow(callId);
@@ -461,6 +503,7 @@ class WaCallManager extends node_events_1.EventEmitter {
             });
             return;
         }
+        this.lastAckAt.set(session.callId, Date.now());
         await session.handleCallAck(node);
         if (session.info.isEnded) {
             await this.release(session.callId);
@@ -853,6 +896,7 @@ class WaCallManager extends node_events_1.EventEmitter {
     discard(session) {
         session.cleanup();
         this.calls.delete(session.callId);
+        this.lastAckAt.delete(session.callId);
     }
     async maybeUnblockWaitingCalls() {
         while (this.activeCallCount < this.maxConcurrentCalls) {

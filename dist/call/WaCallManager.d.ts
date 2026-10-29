@@ -38,6 +38,8 @@ export declare class WaCallManager extends EventEmitter {
     private readonly participantAudio;
     private readonly signalingLogger;
     private readonly calls;
+    /** When the offer ack for a call arrived; absent means it never did. */
+    private readonly lastAckAt;
     /** Set by `destroy`: an offer still resolving when it ran must not make a call. */
     private destroyed;
     private readonly outOfOrder;
@@ -54,6 +56,15 @@ export declare class WaCallManager extends EventEmitter {
      * no key: the call is keyed later over `enc_rekey`.
      */
     private startGroupCall;
+    /**
+     * Watches a hash-based group offer for the ack that never comes.
+     *
+     * <p>A roster too large to name is referenced by its hash and resolved by the server against
+     * the group; when the server drops such an offer it answers nothing at all, and "the call went
+     * up and nothing appeared" looks exactly like a call still being set up. The timer is unref'd so
+     * it never holds the process open, and it only logs -- it does not end the call.
+     */
+    private armHashOfferWatchdog;
     acceptCall(callId: string): Promise<void>;
     rejectCall(callId: string, reason?: EndCallReason): Promise<void>;
     endCall(callId: string, reason?: EndCallReason): Promise<void>;
